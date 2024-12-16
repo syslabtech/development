@@ -23,6 +23,7 @@ func main() {
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/upload", uploadHandler)
 	http.HandleFunc("/download/", downloadHandler)
+	http.HandleFunc("/delete/", deleteHandler)
 	http.HandleFunc("/preview/", previewHandler)
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
@@ -81,10 +82,47 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 // downloadHandler handles file downloads
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
+    // Get the file name from the URL path
+    fileName := filepath.Base(r.URL.Path)
+    // Join the file name with the upload directory path
+    filePath := filepath.Join(uploadDir, fileName)
+
+    // Check if the file exists
+    if _, err := os.Stat(filePath); os.IsNotExist(err) {
+        http.Error(w, "File not found", http.StatusNotFound)
+        return
+    }
+
+    // Set the correct headers to prompt download
+    w.Header().Set("Content-Disposition", "attachment; filename="+fileName)
+    w.Header().Set("Content-Type", "application/octet-stream") // This forces download for any type of file
+    w.Header().Set("Content-Length", fmt.Sprintf("%d", getFileSize(filePath))) // Set the file size for the download
+
+    // Serve the file
+    http.ServeFile(w, r, filePath)
+}
+
+// Helper function to get the file size
+func getFileSize(filePath string) int64 {
+    fileInfo, err := os.Stat(filePath)
+    if err != nil {
+        return 0
+    }
+    return fileInfo.Size()
+}
+
+// deleteHandler handles file deletions
+func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	fileName := filepath.Base(r.URL.Path)
 	filePath := filepath.Join(uploadDir, fileName)
 
-	http.ServeFile(w, r, filePath)
+	err := os.Remove(filePath)
+	if err != nil {
+		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // previewHandler handles file previews

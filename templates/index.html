@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>File Management</title>
+    <link rel="icon" type="image/x-icon"  href="https://img.icons8.com/bubbles/100/cloud-file.png"/>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
         body {
@@ -15,7 +16,7 @@
     </style>
 </head>
 <body>
-    
+
 
     <div class="container">
         <h1 class="text-center">File Management Application</h1>
@@ -42,6 +43,7 @@
                     <div>
                         <button class="btn btn-sm btn-info preview-btn" data-filename="{{.}}" data-bs-toggle="modal" data-bs-target="#previewModal">Preview</button>
                         <a href="/download/{{.}}" class="btn btn-sm btn-success">Download</a>
+                        <button class="btn btn-sm btn-danger delete-btn" data-filename="{{.}}">Delete</button>
                     </div>
                 </li>
                 {{end}}
@@ -69,13 +71,20 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    
     <script>
         $(document).ready(function () {
             // Attach click event to preview buttons
             $(".preview-btn").on("click", function () {
                 var fileName = $(this).data("filename");
                 $("#previewIframe").attr("src", "/preview/" + fileName);
+            });
+
+            // Attach click event to delete buttons
+            $(".delete-btn").on("click", function () {
+                var fileName = $(this).data("filename");
+                if (confirm("Are you sure you want to delete this file?")) {
+                    window.location.href = "/delete/" + fileName;
+                }
             });
         });
     </script>
