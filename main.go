@@ -117,10 +117,10 @@ func main() {
 	}
 
 	// Ensure MongoDB client is connected
-	err = client.Ping(context.Background(), nil)
-	if err != nil {
-		panic(err)
-	}
+	// err = client.Ping(context.Background(), nil)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	// Initialize collections
 	userCollection = client.Database("filemanager").Collection("users")
@@ -201,7 +201,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Debugging line to print files
-	fmt.Println("Files found:", files)
+	// fmt.Println("Files found:", files)
 
 	// Render the template
 	tmpl := template.Must(template.ParseFiles("templates/index.html"))
