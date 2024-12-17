@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - My App</title>
+    
+    <!-- Tailwind CSS (via CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Alpine.js (for interactivity) -->
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@2.8.2/dist/alpine.min.js" defer></script>
+
+    <!-- Favicon (optional) -->
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body class="bg-gray-200 h-screen flex items-center justify-center">
+
+    <!-- Login Card -->
+    <div class="w-full max-w-md p-8 bg-white rounded-lg shadow-lg">
+        <h2 class="text-3xl font-semibold text-center text-gray-800">Sign In</h2>
+        
+        <!-- Error Message (for example, invalid credentials) -->
+        <div x-show="errorMessage" x-text="errorMessage" class="text-red-500 text-sm mt-3 text-center"></div>
+
+        <form action="/login" method="POST" class="space-y-6" x-data="{ errorMessage: '' }">
+            <!-- Username Field -->
+            <div>
+                <label for="username" class="block text-sm font-semibold text-gray-700">Username</label>
+                <input type="text" id="username" name="username" class="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" required>
+            </div>
+
+            <!-- Password Field -->
+            <div>
+                <label for="password" class="block text-sm font-semibold text-gray-700">Password</label>
+                <input type="password" id="password" name="password" class="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" required>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="flex items-center justify-between">
+                <button type="submit" class="w-full py-2 px-4 text-white bg-blue-500 rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500">Log In</button>
+            </div>
+        </form>
+
+        <!-- Register Link -->
+        <div class="text-center mt-4">
+            <p class="text-sm text-gray-600">Don't have an account?</p>
+            <a href="/register" class="text-blue-500 hover:text-blue-600 font-semibold">Register here</a>
+        </div>
+    </div>
+
+    <script>
+        // Example: You can dynamically show the error message (e.g., invalid login)
+        document.addEventListener("DOMContentLoaded", function() {
+            // Set error message from backend if necessary
+            const errorMessage = "Invalid username or password"; // Replace with dynamic error if needed
+            if (errorMessage) {
+                document.querySelector("[x-data]").__x.$data.errorMessage = errorMessage;
+            }
+        });
+    </script>
+</body>
+</html>

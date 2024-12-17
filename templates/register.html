@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - My App</title>
+
+    <!-- Tailwind CSS (via CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 h-screen flex items-center justify-center">
+
+    <!-- Register Form Container -->
+    <div class="w-full max-w-sm p-8 bg-white rounded-lg shadow-lg">
+        <h2 class="text-3xl font-semibold text-center text-gray-800 mb-6">Create an Account</h2>
+
+        <!-- Registration Form -->
+        <form method="POST" action="/register" class="space-y-6">
+            <!-- Username Input -->
+            <div>
+                <label for="username" class="block text-sm font-semibold text-gray-700">Username</label>
+                <input type="text" name="username" id="username" placeholder="Enter your username" required
+                    class="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+            </div>
+
+            <!-- Password Input -->
+            <div>
+                <label for="password" class="block text-sm font-semibold text-gray-700">Password</label>
+                <input type="password" name="password" id="password" placeholder="Enter your password" required
+                    class="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+            </div>
+
+            <!-- Confirm Password Input -->
+            <div>
+                <label for="confirmPassword" class="block text-sm font-semibold text-gray-700">Confirm Password</label>
+                <input type="password" name="confirmPassword" id="confirmPassword" placeholder="Confirm your password" required
+                    class="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <span id="passwordMismatch" class="text-red-500 text-xs hidden">Passwords do not match</span>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="flex items-center justify-between">
+                <button type="submit" id="submitBtn" class="w-full py-2 px-4 text-white bg-blue-500 rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    Register
+                </button>
+            </div>
+        </form>
+
+        <!-- Login Link -->
+        <div class="text-center mt-4">
+            <p class="text-sm text-gray-600">Already have an account?</p>
+            <a href="/login" class="text-blue-500 hover:text-blue-600 font-semibold">Login here</a>
+        </div>
+    </div>
+
+    <!-- Script to handle password match validation -->
+    <script>
+        const passwordInput = document.getElementById('password');
+        const confirmPasswordInput = document.getElementById('confirmPassword');
+        const submitBtn = document.getElementById('submitBtn');
+        const passwordMismatch = document.getElementById('passwordMismatch');
+
+        // Check if password and confirm password match
+        confirmPasswordInput.addEventListener('input', function() {
+            if (passwordInput.value !== confirmPasswordInput.value) {
+                passwordMismatch.classList.remove('hidden');
+                submitBtn.setAttribute('disabled', 'true');
+            } else {
+                passwordMismatch.classList.add('hidden');
+                submitBtn.removeAttribute('disabled');
+            }
+        });
+    </script>
+</body>
+</html>

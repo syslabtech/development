@@ -7,9 +7,32 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
-const uploadDir = "./uploads"
+// In-code user database
+var (
+	users       = map[string]string{"admin": "password"} // username: password
+	userFiles   = map[string][]string{}                 // username: [files]
+	sessionData = map[string]string{}                   // sessionID: username
+	mutex       = &sync.Mutex{}
+)
+
+const (
+	uploadDir = "./uploads"
+)
+
+// Middleware to check authentication
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("session")
+		if err != nil || sessionData[cookie.Value] == "" {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}
+}
 
 func main() {
 	// Ensure the upload directory exists
@@ -20,12 +43,16 @@ func main() {
 		}
 	}
 
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/upload", uploadHandler)
-	http.HandleFunc("/download/", downloadHandler)
-	http.HandleFunc("/delete/", deleteHandler)
-	http.HandleFunc("/preview/", previewHandler)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+	// Set up routes
+	http.HandleFunc("/", authMiddleware(homeHandler))
+	http.HandleFunc("/upload", authMiddleware(uploadHandler))
+	http.HandleFunc("/download/", authMiddleware(downloadHandler))
+	http.HandleFunc("/delete/", authMiddleware(deleteHandler))
+	http.HandleFunc("/preview/", authMiddleware(previewHandler))
+
+	http.HandleFunc("/login", loginHandler)
+	http.HandleFunc("/logout", logoutHandler)
+	http.HandleFunc("/register", registerHandler)
 
 	fmt.Println("Server started at http://localhost:8080")
 	err := http.ListenAndServe(":8080", nil)
@@ -34,14 +61,26 @@ func main() {
 	}
 }
 
-// homeHandler renders the home page with the file list
+// Home Handler
 func homeHandler(w http.ResponseWriter, r *http.Request) {
-	files, err := listFiles()
+	// Get the session cookie
+	cookie, err := r.Cookie("session")
 	if err != nil {
-		http.Error(w, "Unable to list files", http.StatusInternalServerError)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 
+	// Retrieve the username from the session data
+	username := sessionData[cookie.Value]
+	if username == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Get the user's files
+	files := userFiles[username]
+
+	// Render the template
 	tmpl := template.Must(template.ParseFiles("templates/index.html"))
 	err = tmpl.Execute(w, files)
 	if err != nil {
@@ -49,13 +88,89 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// uploadHandler handles file uploads
+// Login Handler
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+
+		mutex.Lock()
+		defer mutex.Unlock()
+
+		if pass, exists := users[username]; exists && pass == password {
+			sessionID := fmt.Sprintf("%d", len(sessionData)+1)
+			sessionData[sessionID] = username
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: sessionID, Path: "/"})
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	tmpl := template.Must(template.ParseFiles("templates/login.html"))
+	tmpl.Execute(w, nil)
+}
+
+// Logout Handler
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session")
+	if err == nil {
+		mutex.Lock()
+		delete(sessionData, cookie.Value)
+		mutex.Unlock()
+	}
+
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+// Register Handler
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+
+		mutex.Lock()
+		defer mutex.Unlock()
+
+		if _, exists := users[username]; exists {
+			http.Error(w, "User already exists", http.StatusConflict)
+			return
+		}
+
+		users[username] = password
+		userFiles[username] = []string{}
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	tmpl := template.Must(template.ParseFiles("templates/register.html"))
+	tmpl.Execute(w, nil)
+}
+
+// Upload Handler
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// Get the session cookie
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Retrieve the username from the session
+	username := sessionData[cookie.Value]
+	if username == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Retrieve the uploaded file
 	file, handler, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "Unable to read file", http.StatusBadRequest)
@@ -63,8 +178,9 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Save the file
-	dst, err := os.Create(filepath.Join(uploadDir, handler.Filename))
+	// Save the file with a unique name for the user
+	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", username, handler.Filename))
+	dst, err := os.Create(filePath)
 	if err != nil {
 		http.Error(w, "Unable to save file", http.StatusInternalServerError)
 		return
@@ -77,74 +193,157 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Add the file to the user's list
+	mutex.Lock()
+	userFiles[username] = append(userFiles[username], handler.Filename)
+	mutex.Unlock()
+
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// downloadHandler handles file downloads
+// Download Handler
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
-    // Get the file name from the URL path
-    fileName := filepath.Base(r.URL.Path)
-    // Join the file name with the upload directory path
-    filePath := filepath.Join(uploadDir, fileName)
-
-    // Check if the file exists
-    if _, err := os.Stat(filePath); os.IsNotExist(err) {
-        http.Error(w, "File not found", http.StatusNotFound)
-        return
-    }
-
-    // Set the correct headers to prompt download
-    w.Header().Set("Content-Disposition", "attachment; filename="+fileName)
-    w.Header().Set("Content-Type", "application/octet-stream") // This forces download for any type of file
-    w.Header().Set("Content-Length", fmt.Sprintf("%d", getFileSize(filePath))) // Set the file size for the download
-
-    // Serve the file
-    http.ServeFile(w, r, filePath)
-}
-
-// Helper function to get the file size
-func getFileSize(filePath string) int64 {
-    fileInfo, err := os.Stat(filePath)
-    if err != nil {
-        return 0
-    }
-    return fileInfo.Size()
-}
-
-// deleteHandler handles file deletions
-func deleteHandler(w http.ResponseWriter, r *http.Request) {
-	fileName := filepath.Base(r.URL.Path)
-	filePath := filepath.Join(uploadDir, fileName)
-
-	err := os.Remove(filePath)
+	// Get the session cookie
+	cookie, err := r.Cookie("session")
 	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Retrieve the username from the session
+	username := sessionData[cookie.Value]
+	if username == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Extract the file name from the URL path
+	fileName := filepath.Base(r.URL.Path)
+
+	// Check if the file belongs to the user
+	mutex.Lock()
+	userFilesList, exists := userFiles[username]
+	mutex.Unlock()
+
+	if !exists || !contains(userFilesList, fileName) {
+		http.Error(w, "Unauthorized to access this file", http.StatusUnauthorized)
+		return
+	}
+
+	// Generate the file path based on the username and file name
+	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", username, fileName))
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	// Set the headers for file download
+	w.Header().Set("Content-Disposition", "attachment; filename="+fileName)
+	http.ServeFile(w, r, filePath)
+}
+
+// Delete Handler
+func deleteHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the session cookie
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Retrieve the username from the session
+	username := sessionData[cookie.Value]
+	if username == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Extract the file name from the URL path
+	fileName := filepath.Base(r.URL.Path)
+
+	// Check if the file belongs to the user
+	mutex.Lock()
+	userFilesList, exists := userFiles[username]
+	if !exists || !contains(userFilesList, fileName) {
+		mutex.Unlock()
+		http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
+		return
+	}
+
+	// Remove the file from the file system
+	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", username, fileName))
+	err = os.Remove(filePath)
+	if err != nil {
+		mutex.Unlock()
 		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
 		return
 	}
 
+	// Update the user's file list
+	userFiles[username] = removeFileFromList(userFilesList, fileName)
+	mutex.Unlock()
+
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// previewHandler handles file previews
+// Preview Handler
 func previewHandler(w http.ResponseWriter, r *http.Request) {
-	fileName := filepath.Base(r.URL.Path)
-	filePath := filepath.Join(uploadDir, fileName)
+	// Get the session cookie
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 
+	// Retrieve the username from the session
+	username := sessionData[cookie.Value]
+	if username == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Extract the file name from the URL path
+	fileName := filepath.Base(r.URL.Path)
+
+	// Check if the file belongs to the user
+	mutex.Lock()
+	userFilesList, exists := userFiles[username]
+	if !exists || !contains(userFilesList, fileName) {
+		mutex.Unlock()
+		http.Error(w, "Unauthorized to preview this file", http.StatusUnauthorized)
+		return
+	}
+
+	// Check if the file exists
+	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", username, fileName))
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		mutex.Unlock()
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	// Serve the file for preview
 	http.ServeFile(w, r, filePath)
+	mutex.Unlock()
 }
 
-// listFiles lists all files in the upload directory
-func listFiles() ([]string, error) {
-	var files []string
-	entries, err := os.ReadDir(uploadDir)
-	if err != nil {
-		return nil, err
-	}
+// Helper functions
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, entry.Name())
+func contains(files []string, fileName string) bool {
+	for _, f := range files {
+		if f == fileName {
+			return true
 		}
 	}
-	return files, nil
+	return false
+}
+
+func removeFileFromList(files []string, fileName string) []string {
+	var updatedFiles []string
+	for _, f := range files {
+		if f != fileName {
+			updatedFiles = append(updatedFiles, f)
+		}
+	}
+	return updatedFiles
 }
