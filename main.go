@@ -38,10 +38,79 @@ type File struct {
 	UploadDate time.Time          `bson:"uploadDate"`
 }
 
+// func init() {
+// 	// Load environment variables from the .env file
+// 	err := godotenv.Load()
+// 	if err != nil {
+// 		log.Fatalf("Error loading .env file: %v", err)
+// 	}
+
+// 	// Get the Vault address, HCP Client ID, and HCP Client Secret from environment variables
+// 	vaultAddr := os.Getenv("VAULT_ADDR")
+// 	hcpClientID := os.Getenv("HCP_CLIENT_ID")
+// 	hcpClientSecret := os.Getenv("HCP_CLIENT_SECRET")
+
+// 	// Initialize the Vault client
+// 	client, err := api.NewClient(&api.Config{
+// 		Address: vaultAddr, // Use the Vault address from environment variable
+// 	})
+// 	if err != nil {
+// 		log.Fatalf("Error creating Vault client: %v", err)
+// 	}
+
+// 	// Set up authentication data for HCP Vault
+// 	authData := map[string]interface{}{
+// 		"client_id":     hcpClientID,
+// 		"client_secret": hcpClientSecret,
+// 	}
+
+// 	// Authenticate with HCP Vault and retrieve a Vault token
+// 	// Making a direct API request for authentication
+// 	authResponse, err := client.Logical().Write("auth/hcp/login", authData)
+// 	if err != nil {
+// 		log.Fatalf("Error authenticating with HCP credentials: %v", err)
+// 	}
+
+// 	// Check if we received the client token from the authentication response
+// 	if authResponse == nil || authResponse.Auth == nil {
+// 		log.Fatalf("Authentication failed, no token returned")
+// 	}
+
+// 	// Set the Vault token for subsequent requests
+// 	client.SetToken(authResponse.Auth.ClientToken)
+
+// 	// Specify the path to the secret (for example, "secret/data/my-secret")
+// 	secretPath := "secret/data/my-secret" // Adjust the path to your secret
+
+// 	// Retrieve the secret from Vault
+// 	secret, err := client.Logical().Read(secretPath)
+// 	if err != nil {
+// 		log.Fatalf("Error reading secret from Vault: %v", err)
+// 	}
+
+// 	// Check if the secret was found
+// 	if secret == nil {
+// 		log.Fatalf("Secret not found at path %s", secretPath)
+// 	}
+
+// 	// Extract the value from the secret
+// 	// Assuming the secret is stored as a key-value pair, e.g., {"data": {"my-key": "my-value"}}
+// 	if data, ok := secret.Data["data"].(map[string]interface{}); ok {
+// 		if myValue, ok := data["my-key"].(string); ok {
+// 			fmt.Printf("Retrieved secret value: %s\n", myValue)
+// 		} else {
+// 			log.Fatalf("Key 'my-key' not found in the secret data")
+// 		}
+// 	} else {
+// 		log.Fatalf("Invalid secret structure")
+// 	}
+
+// }
+
 func main() {
 	// Connect to MongoDB
 	var err error
-	clientOptions := options.Client().ApplyURI("mongodb")
+	clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:XXvI8eNLpOJKpu6e2RNj1B2ot@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
 	client, err = mongo.Connect(context.Background(), clientOptions)
 	if err != nil {
 		panic(err)
@@ -347,7 +416,7 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 //     http.Redirect(w, r, "/", http.StatusSeeOther)
 // }
 
-//  Soft Delete
+// Soft Delete
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the session cookie
 	cookie, err := r.Cookie("session")
@@ -397,11 +466,6 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	// Redirect back to the home page
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
-
-
-
-
-
 
 // Preview Handler
 func previewHandler(w http.ResponseWriter, r *http.Request) {
