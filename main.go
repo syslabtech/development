@@ -41,7 +41,7 @@ type File struct {
 func main() {
 	// Connect to MongoDB
 	var err error
-	clientOptions := options.Client().ApplyURI("MONGOURL")
+	clientOptions := options.Client().ApplyURI("mongodb")
 	client, err = mongo.Connect(context.Background(), clientOptions)
 	if err != nil {
 		panic(err)
@@ -305,47 +305,102 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filePath)
 }
 
-// Delete Handler
+// Delete Handler  Soft Delete
+// func deleteHandler(w http.ResponseWriter, r *http.Request) {
+//     // Get the session cookie
+//     cookie, err := r.Cookie("session")
+//     if err != nil {
+//         http.Redirect(w, r, "/login", http.StatusSeeOther)
+//         return
+//     }
+
+//     // Retrieve the user ID from the session
+//     userIDHex := sessionData[cookie.Value]
+//     userID, err := primitive.ObjectIDFromHex(userIDHex)
+//     if err != nil {
+//         http.Redirect(w, r, "/login", http.StatusSeeOther)
+//         return
+//     }
+
+//     // Extract the file name from the URL path
+//     fileName := filepath.Base(r.URL.Path)
+
+//     // Check if the file belongs to the user in MongoDB
+//     var file File
+//     err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName, "deleted": bson.M{"$ne": true}}).Decode(&file)
+//     if err != nil {
+//         http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
+//         return
+//     }
+
+//     // Flag the file as deleted in MongoDB
+//     update := bson.M{"$set": bson.M{"deleted": true}}
+//     _, err = fileCollection.UpdateOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}, update)
+//     if err != nil {
+//         http.Error(w, "Unable to update file metadata", http.StatusInternalServerError)
+//         return
+//     }
+
+//     // Optional: Log or perform other operations (e.g., send a notification, etc.)
+
+//     // Redirect back to the home page (or wherever you want)
+//     http.Redirect(w, r, "/", http.StatusSeeOther)
+// }
+
+//  Soft Delete
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
-    // Get the session cookie
-    cookie, err := r.Cookie("session")
-    if err != nil {
-        http.Redirect(w, r, "/login", http.StatusSeeOther)
-        return
-    }
+	// Get the session cookie
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 
-    // Retrieve the user ID from the session
-    userIDHex := sessionData[cookie.Value]
-    userID, err := primitive.ObjectIDFromHex(userIDHex)
-    if err != nil {
-        http.Redirect(w, r, "/login", http.StatusSeeOther)
-        return
-    }
+	// Retrieve the user ID from the session
+	userIDHex := sessionData[cookie.Value]
+	userID, err := primitive.ObjectIDFromHex(userIDHex)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 
-    // Extract the file name from the URL path
-    fileName := filepath.Base(r.URL.Path)
+	// Extract the file name from the URL path
+	fileName := filepath.Base(r.URL.Path)
 
-    // Check if the file belongs to the user in MongoDB
-    var file File
-    err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName, "deleted": bson.M{"$ne": true}}).Decode(&file)
-    if err != nil {
-        http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
-        return
-    }
+	// Check if the file belongs to the user in MongoDB
+	var file File
+	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
+	if err != nil {
+		http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
+		return
+	}
 
-    // Flag the file as deleted in MongoDB
-    update := bson.M{"$set": bson.M{"deleted": true}}
-    _, err = fileCollection.UpdateOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}, update)
-    if err != nil {
-        http.Error(w, "Unable to update file metadata", http.StatusInternalServerError)
-        return
-    }
+	// Remove the file from the file system
+	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
+	err = os.Remove(filePath)
+	if err != nil {
+		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
+		return
+	}
 
-    // Optional: Log or perform other operations (e.g., send a notification, etc.)
+	// Update file metadata to mark it as deleted in MongoDB
+	_, err = fileCollection.UpdateOne(
+		context.Background(),
+		bson.M{"user_id": userID, "filename": fileName},
+		bson.M{"$set": bson.M{"deleted": true}},
+	)
+	if err != nil {
+		http.Error(w, "Unable to update file metadata", http.StatusInternalServerError)
+		return
+	}
 
-    // Redirect back to the home page (or wherever you want)
-    http.Redirect(w, r, "/", http.StatusSeeOther)
+	// Redirect back to the home page
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
+
+
+
+
 
 
 // Preview Handler
