@@ -110,7 +110,7 @@ type File struct {
 func main() {
 	// Connect to MongoDB
 	var err error
-	clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:XXvI8eNLpOJKpu6e2RNj1B2ot@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
+	clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:G30752G5JQc8tIa2yzi0UN4fV@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
 	client, err = mongo.Connect(context.Background(), clientOptions)
 	if err != nil {
 		panic(err)
