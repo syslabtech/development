@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"io"
@@ -8,33 +9,54 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// In-code user database
 var (
-	users       = map[string]string{"admin": "password"} // username: password
-	userFiles   = map[string][]string{}                 // username: [files]
-	sessionData = map[string]string{}                   // sessionID: username
-	mutex       = &sync.Mutex{}
+	client         *mongo.Client
+	userCollection *mongo.Collection
+	fileCollection *mongo.Collection
+	sessionData    = map[string]string{} // sessionID: userID
+	mutex          = &sync.Mutex{}
+	uploadDir      = "./uploads"
 )
 
-const (
-	uploadDir = "./uploads"
-)
+type User struct {
+	ID       primitive.ObjectID `bson:"_id,omitempty"`
+	Username string             `bson:"username"`
+	Password string             `bson:"password"`
+}
 
-// Middleware to check authentication
-func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("session")
-		if err != nil || sessionData[cookie.Value] == "" {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-			return
-		}
-		next.ServeHTTP(w, r)
-	}
+type File struct {
+	UserID     primitive.ObjectID `bson:"user_id"`
+	Filename   string             `bson:"filename"`
+	UploadDate time.Time          `bson:"uploadDate"`
 }
 
 func main() {
+	// Connect to MongoDB
+	var err error
+	clientOptions := options.Client().ApplyURI("MONGOURL")
+	client, err = mongo.Connect(context.Background(), clientOptions)
+	if err != nil {
+		panic(err)
+	}
+
+	// Ensure MongoDB client is connected
+	err = client.Ping(context.Background(), nil)
+	if err != nil {
+		panic(err)
+	}
+
+	// Initialize collections
+	userCollection = client.Database("filemanager").Collection("users")
+	fileCollection = client.Database("filemanager").Collection("files")
+
 	// Ensure the upload directory exists
 	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
 		err := os.Mkdir(uploadDir, 0755)
@@ -55,9 +77,21 @@ func main() {
 	http.HandleFunc("/register", registerHandler)
 
 	fmt.Println("Server started at http://localhost:8080")
-	err := http.ListenAndServe(":8080", nil)
+	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		panic(err)
+	}
+}
+
+// Middleware to check authentication
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("session")
+		if err != nil || sessionData[cookie.Value] == "" {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
 	}
 }
 
@@ -70,15 +104,35 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve the username from the session data
-	username := sessionData[cookie.Value]
-	if username == "" {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	// Retrieve the user ID from the session data
+	userIDHex := sessionData[cookie.Value]
+	userID, err := primitive.ObjectIDFromHex(userIDHex)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusInternalServerError)
 		return
 	}
 
-	// Get the user's files
-	files := userFiles[username]
+	// Retrieve the user's files from MongoDB
+	var files []File
+	cursor, err := fileCollection.Find(context.Background(), bson.M{"user_id": userID, "deleted": bson.M{"$ne": true}})
+	if err != nil {
+		http.Error(w, "Unable to retrieve files", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	for cursor.Next(context.Background()) {
+		var file File
+		err := cursor.Decode(&file)
+		if err != nil {
+			http.Error(w, "Unable to decode file", http.StatusInternalServerError)
+			return
+		}
+		files = append(files, file)
+	}
+
+	// Debugging line to print files
+	fmt.Println("Files found:", files)
 
 	// Render the template
 	tmpl := template.Must(template.ParseFiles("templates/index.html"))
@@ -94,18 +148,19 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		mutex.Lock()
-		defer mutex.Unlock()
-
-		if pass, exists := users[username]; exists && pass == password {
-			sessionID := fmt.Sprintf("%d", len(sessionData)+1)
-			sessionData[sessionID] = username
-			http.SetCookie(w, &http.Cookie{Name: "session", Value: sessionID, Path: "/"})
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+		// Find user in MongoDB
+		var user User
+		err := userCollection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
+		if err != nil || user.Password != password {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 			return
 		}
 
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		// Set session
+		sessionID := fmt.Sprintf("%d", len(sessionData)+1)
+		sessionData[sessionID] = user.ID.Hex()
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: sessionID, Path: "/"})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
@@ -131,16 +186,22 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		mutex.Lock()
-		defer mutex.Unlock()
-
-		if _, exists := users[username]; exists {
+		// Check if user already exists
+		var user User
+		err := userCollection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
+		if err == nil {
 			http.Error(w, "User already exists", http.StatusConflict)
 			return
 		}
 
-		users[username] = password
-		userFiles[username] = []string{}
+		// Insert new user into MongoDB
+		userID := primitive.NewObjectID()
+		_, err = userCollection.InsertOne(context.Background(), User{ID: userID, Username: username, Password: password})
+		if err != nil {
+			http.Error(w, "Unable to register user", http.StatusInternalServerError)
+			return
+		}
+
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -163,9 +224,10 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve the username from the session
-	username := sessionData[cookie.Value]
-	if username == "" {
+	// Retrieve the user ID from the session
+	userIDHex := sessionData[cookie.Value]
+	userID, err := primitive.ObjectIDFromHex(userIDHex)
+	if err != nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -179,7 +241,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// Save the file with a unique name for the user
-	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", username, handler.Filename))
+	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, handler.Filename))
 	dst, err := os.Create(filePath)
 	if err != nil {
 		http.Error(w, "Unable to save file", http.StatusInternalServerError)
@@ -193,10 +255,12 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add the file to the user's list
-	mutex.Lock()
-	userFiles[username] = append(userFiles[username], handler.Filename)
-	mutex.Unlock()
+	// Add file metadata to MongoDB
+	_, err = fileCollection.InsertOne(context.Background(), File{UserID: userID, Filename: handler.Filename, UploadDate: time.Now()})
+	if err != nil {
+		http.Error(w, "Unable to save file metadata", http.StatusInternalServerError)
+		return
+	}
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -210,9 +274,10 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve the username from the session
-	username := sessionData[cookie.Value]
-	if username == "" {
+	// Retrieve the user ID from the session
+	userIDHex := sessionData[cookie.Value]
+	userID, err := primitive.ObjectIDFromHex(userIDHex)
+	if err != nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -220,18 +285,16 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	// Extract the file name from the URL path
 	fileName := filepath.Base(r.URL.Path)
 
-	// Check if the file belongs to the user
-	mutex.Lock()
-	userFilesList, exists := userFiles[username]
-	mutex.Unlock()
-
-	if !exists || !contains(userFilesList, fileName) {
+	// Check if the file belongs to the user in MongoDB
+	var file File
+	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
+	if err != nil {
 		http.Error(w, "Unauthorized to access this file", http.StatusUnauthorized)
 		return
 	}
 
-	// Generate the file path based on the username and file name
-	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", username, fileName))
+	// Generate the file path based on the user ID and file name
+	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		http.Error(w, "File not found", http.StatusNotFound)
 		return
@@ -244,47 +307,46 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 
 // Delete Handler
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
-	// Get the session cookie
-	cookie, err := r.Cookie("session")
-	if err != nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
+    // Get the session cookie
+    cookie, err := r.Cookie("session")
+    if err != nil {
+        http.Redirect(w, r, "/login", http.StatusSeeOther)
+        return
+    }
 
-	// Retrieve the username from the session
-	username := sessionData[cookie.Value]
-	if username == "" {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
+    // Retrieve the user ID from the session
+    userIDHex := sessionData[cookie.Value]
+    userID, err := primitive.ObjectIDFromHex(userIDHex)
+    if err != nil {
+        http.Redirect(w, r, "/login", http.StatusSeeOther)
+        return
+    }
 
-	// Extract the file name from the URL path
-	fileName := filepath.Base(r.URL.Path)
+    // Extract the file name from the URL path
+    fileName := filepath.Base(r.URL.Path)
 
-	// Check if the file belongs to the user
-	mutex.Lock()
-	userFilesList, exists := userFiles[username]
-	if !exists || !contains(userFilesList, fileName) {
-		mutex.Unlock()
-		http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
-		return
-	}
+    // Check if the file belongs to the user in MongoDB
+    var file File
+    err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName, "deleted": bson.M{"$ne": true}}).Decode(&file)
+    if err != nil {
+        http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
+        return
+    }
 
-	// Remove the file from the file system
-	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", username, fileName))
-	err = os.Remove(filePath)
-	if err != nil {
-		mutex.Unlock()
-		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
-		return
-	}
+    // Flag the file as deleted in MongoDB
+    update := bson.M{"$set": bson.M{"deleted": true}}
+    _, err = fileCollection.UpdateOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}, update)
+    if err != nil {
+        http.Error(w, "Unable to update file metadata", http.StatusInternalServerError)
+        return
+    }
 
-	// Update the user's file list
-	userFiles[username] = removeFileFromList(userFilesList, fileName)
-	mutex.Unlock()
+    // Optional: Log or perform other operations (e.g., send a notification, etc.)
 
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+    // Redirect back to the home page (or wherever you want)
+    http.Redirect(w, r, "/", http.StatusSeeOther)
 }
+
 
 // Preview Handler
 func previewHandler(w http.ResponseWriter, r *http.Request) {
@@ -295,9 +357,10 @@ func previewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve the username from the session
-	username := sessionData[cookie.Value]
-	if username == "" {
+	// Retrieve the user ID from the session
+	userIDHex := sessionData[cookie.Value]
+	userID, err := primitive.ObjectIDFromHex(userIDHex)
+	if err != nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -305,45 +368,15 @@ func previewHandler(w http.ResponseWriter, r *http.Request) {
 	// Extract the file name from the URL path
 	fileName := filepath.Base(r.URL.Path)
 
-	// Check if the file belongs to the user
-	mutex.Lock()
-	userFilesList, exists := userFiles[username]
-	if !exists || !contains(userFilesList, fileName) {
-		mutex.Unlock()
+	// Check if the file belongs to the user in MongoDB
+	var file File
+	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
+	if err != nil {
 		http.Error(w, "Unauthorized to preview this file", http.StatusUnauthorized)
 		return
 	}
 
-	// Check if the file exists
-	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", username, fileName))
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		mutex.Unlock()
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-
 	// Serve the file for preview
+	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
 	http.ServeFile(w, r, filePath)
-	mutex.Unlock()
-}
-
-// Helper functions
-
-func contains(files []string, fileName string) bool {
-	for _, f := range files {
-		if f == fileName {
-			return true
-		}
-	}
-	return false
-}
-
-func removeFileFromList(files []string, fileName string) []string {
-	var updatedFiles []string
-	for _, f := range files {
-		if f != fileName {
-			updatedFiles = append(updatedFiles, f)
-		}
-	}
-	return updatedFiles
 }
