@@ -201,7 +201,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Debugging line to print files
-	// fmt.Println("Files found:", files)
+	fmt.Println("Files found:", files)
 
 	// Render the template
 	tmpl := template.Must(template.ParseFiles("templates/index.html"))
@@ -238,33 +238,15 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Logout Handler
-// Logout handler
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
-    // Get the session cookie
-    cookie, err := r.Cookie("session")
-    if err != nil {
-        http.Redirect(w, r, "/login", http.StatusSeeOther)
-        return
-    }
+	cookie, err := r.Cookie("session")
+	if err == nil {
+		mutex.Lock()
+		delete(sessionData, cookie.Value)
+		mutex.Unlock()
+	}
 
-    // Remove the session from the sessionData map (in-memory storage)
-    delete(sessionData, cookie.Value)
-
-    // Optionally, if you store sessions in a database, remove it from the database here as well
-    // For example, if you're using MongoDB for session storage:
-    // sessionCollection.DeleteOne(context.Background(), bson.M{"session_id": cookie.Value})
-
-    // Expire the session cookie
-    http.SetCookie(w, &http.Cookie{
-        Name:     "session",
-        Value:    "",
-        Path:     "/",
-        MaxAge:   -1,  // Negative max age will expire the cookie
-        HttpOnly: true,
-    })
-
-    // Redirect to login page
-    http.Redirect(w, r, "/login", http.StatusSeeOther)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 // Register Handler
