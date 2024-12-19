@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 var (
@@ -24,6 +28,7 @@ var (
 	sessionData    = map[string]string{} // sessionID: userID
 	mutex          = &sync.Mutex{}
 	uploadDir      = "./uploads"
+	secretKey      [32]byte
 )
 
 type User struct {
@@ -36,6 +41,66 @@ type File struct {
 	UserID     primitive.ObjectID `bson:"user_id"`
 	Filename   string             `bson:"filename"`
 	UploadDate time.Time          `bson:"uploadDate"`
+}
+
+type EncryptionKey struct {
+    ID  primitive.ObjectID `bson:"_id,omitempty"`
+    Key []byte             `bson:"key"`
+}
+
+func init() {
+	 // Connect to MongoDB
+	 clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:G30752G5JQc8tIa2yzi0UN4fV@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
+	 client, err := mongo.Connect(context.Background(), clientOptions)
+	 if err != nil {
+		 panic(err)
+	 }
+ 
+	 
+	 // Ensure the connection is established
+	 err = client.Ping(context.Background(), nil)
+	 if err != nil {
+		 panic(err)
+	 }
+ 
+	 // Get the key collection
+	 keyCollection := client.Database("filemanager").Collection("keys")
+ 
+
+	 // Initialize collections
+	userCollection = client.Database("filemanager").Collection("users")
+	fileCollection = client.Database("filemanager").Collection("files")
+
+	// Ensure the upload directory exists
+	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
+		err := os.Mkdir(uploadDir, 0755)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+
+	 // Retrieve the encryption key from MongoDB
+	 var encryptionKey EncryptionKey
+	 err = keyCollection.FindOne(context.Background(), bson.M{}).Decode(&encryptionKey)
+	 if err == mongo.ErrNoDocuments {
+		 // Generate a new key if none exists
+		 if _, err := io.ReadFull(rand.Reader, secretKey[:]); err != nil {
+			 panic(err)
+		 }
+ 
+		 // Store the new key in MongoDB
+		 _, err = keyCollection.InsertOne(context.Background(), EncryptionKey{Key: secretKey[:]})
+		 if err != nil {
+			 panic(err)
+		 }
+	 } else if err != nil {
+		 panic(err)
+	 } else {
+		 // Use the retrieved key
+		 copy(secretKey[:], encryptionKey.Key)
+	 }
+	 log.Println("Connected DB")
 }
 
 // func init() {
@@ -109,12 +174,12 @@ type File struct {
 
 func main() {
 	// Connect to MongoDB
-	var err error
-	clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:G30752G5JQc8tIa2yzi0UN4fV@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
-	client, err = mongo.Connect(context.Background(), clientOptions)
-	if err != nil {
-		panic(err)
-	}
+	// var err error
+	// clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:G30752G5JQc8tIa2yzi0UN4fV@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
+	// client, err = mongo.Connect(context.Background(), clientOptions)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	// Ensure MongoDB client is connected
 	// err = client.Ping(context.Background(), nil)
@@ -122,31 +187,19 @@ func main() {
 	// 	panic(err)
 	// }
 
-	// Initialize collections
-	userCollection = client.Database("filemanager").Collection("users")
-	fileCollection = client.Database("filemanager").Collection("files")
-
-	// Ensure the upload directory exists
-	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
-		err := os.Mkdir(uploadDir, 0755)
-		if err != nil {
-			panic(err)
-		}
-	}
-
+	
 	// Set up routes
 	http.HandleFunc("/", authMiddleware(homeHandler))
 	http.HandleFunc("/upload", authMiddleware(uploadHandler))
 	http.HandleFunc("/download/", authMiddleware(downloadHandler))
 	http.HandleFunc("/delete/", authMiddleware(deleteHandler))
 	http.HandleFunc("/preview/", authMiddleware(previewHandler))
-
 	http.HandleFunc("/login", loginHandler)
 	http.HandleFunc("/logout", logoutHandler)
 	http.HandleFunc("/register", registerHandler)
 
 	fmt.Println("Server started at http://localhost:8080")
-	err = http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
 		panic(err)
 	}
@@ -162,6 +215,51 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next.ServeHTTP(w, r)
 	}
+}
+
+func encryptFile(inputFile, outputFile string) error {
+	inFile, err := os.Open(inputFile)
+	if err != nil {
+		return err
+	}
+	defer inFile.Close()
+
+	data, err := io.ReadAll(inFile)
+	if err != nil {
+		return err
+	}
+
+	var nonce [24]byte
+	if _, err := io.ReadFull(rand.Reader, nonce[:]); err != nil {
+		return err
+	}
+
+	encrypted := secretbox.Seal(nonce[:], data, &nonce, &secretKey)
+
+	return os.WriteFile(outputFile, encrypted, 0644)
+}
+
+func decryptFile(inputFile, outputFile string) error {
+	inFile, err := os.Open(inputFile)
+	if err != nil {
+		return err
+	}
+	defer inFile.Close()
+
+	encrypted, err := io.ReadAll(inFile)
+	if err != nil {
+		return err
+	}
+
+	var nonce [24]byte
+	copy(nonce[:], encrypted[:24])
+
+	decrypted, ok := secretbox.Open(nil, encrypted[24:], &nonce, &secretKey)
+	if !ok {
+		return errors.New("decryption error")
+	}
+
+	return os.WriteFile(outputFile, decrypted, 0644)
 }
 
 // Home Handler
@@ -310,8 +408,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// Save the file with a unique name for the user
-	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, handler.Filename))
-	dst, err := os.Create(filePath)
+	tempFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.tmp", userIDHex, handler.Filename))
+	dst, err := os.Create(tempFilePath)
 	if err != nil {
 		http.Error(w, "Unable to save file", http.StatusInternalServerError)
 		return
@@ -323,6 +421,17 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unable to save file", http.StatusInternalServerError)
 		return
 	}
+
+	// Encrypt the file
+	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, handler.Filename))
+	err = encryptFile(tempFilePath, encryptedFilePath)
+	if err != nil {
+		http.Error(w, "Unable to encrypt file", http.StatusInternalServerError)
+		return
+	}
+
+	// Remove the temporary file
+	os.Remove(tempFilePath)
 
 	// Add file metadata to MongoDB
 	_, err = fileCollection.InsertOne(context.Background(), File{UserID: userID, Filename: handler.Filename, UploadDate: time.Now()})
@@ -363,15 +472,25 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate the file path based on the user ID and file name
-	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
+	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
 		http.Error(w, "File not found", http.StatusNotFound)
 		return
 	}
 
+	// Decrypt the file
+	decryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
+	err = decryptFile(encryptedFilePath, decryptedFilePath)
+	if err != nil {
+		http.Error(w, "Unable to decrypt file", http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(decryptedFilePath)
+
 	// Set the headers for file download
 	w.Header().Set("Content-Disposition", "attachment; filename="+fileName)
-	http.ServeFile(w, r, filePath)
+	http.ServeFile(w, r, decryptedFilePath)
+
 }
 
 // Delete Handler  Soft Delete
@@ -445,8 +564,14 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove the file from the file system
-	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
-	err = os.Remove(filePath)
+	// Generate the file path based on the user ID and file name
+    encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
+    if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
+        http.Error(w, "File not found", http.StatusNotFound)
+        return
+    }
+
+	err = os.Remove(encryptedFilePath)
 	if err != nil {
 		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
 		return
@@ -495,7 +620,61 @@ func previewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve the file for preview
-	filePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
-	http.ServeFile(w, r, filePath)
+	// Generate the file path based on the user ID and file name
+	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
+	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	// Decrypt the file
+	decryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
+	err = decryptFile(encryptedFilePath, decryptedFilePath)
+	if err != nil {
+		http.Error(w, "Unable to decrypt file", http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(decryptedFilePath)
+
+	// Determine the content type
+	contentType := http.DetectContentType([]byte(fileName))
+	w.Header().Set("Content-Type", contentType)
+
+	// Serve the decrypted file for preview
+	http.ServeFile(w, r, decryptedFilePath)
+}
+
+// ...existing code...
+
+func shareHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the session cookie
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Retrieve the user ID from the session
+	userIDHex := sessionData[cookie.Value]
+	userID, err := primitive.ObjectIDFromHex(userIDHex)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Extract the file name from the URL path
+	fileName := filepath.Base(r.URL.Path)
+
+	// Check if the file belongs to the user in MongoDB
+	var file File
+	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
+	if err != nil {
+		http.Error(w, "Unauthorized to access this file", http.StatusUnauthorized)
+		return
+	}
+
+	// Generate the shareable link
+	shareableLink := fmt.Sprintf("%s/download/%s", r.Host, fileName)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(fmt.Sprintf(`{"shareable_link": "%s"}`, shareableLink)))
 }
