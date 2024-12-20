@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"html/template"
@@ -18,6 +19,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -35,6 +37,7 @@ type User struct {
 	ID       primitive.ObjectID `bson:"_id,omitempty"`
 	Username string             `bson:"username"`
 	Password string             `bson:"password"`
+	Salt     string             `bson:"salt"`  
 }
 
 type File struct {
@@ -44,30 +47,48 @@ type File struct {
 }
 
 type EncryptionKey struct {
-    ID  primitive.ObjectID `bson:"_id,omitempty"`
-    Key []byte             `bson:"key"`
+	ID  primitive.ObjectID `bson:"_id,omitempty"`
+	Key []byte             `bson:"key"`
+}
+
+func generateSalt() (string, error) {
+	salt := make([]byte, 16)
+	_, err := rand.Read(salt)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(salt), nil
+}
+
+func hashPassword(password, salt string) string {
+	saltBytes := []byte(salt)
+	hash := argon2.IDKey([]byte(password), saltBytes, 1, 64*1024, 4, 32)
+	return base64.StdEncoding.EncodeToString(hash)
+}
+
+func verifyPassword(hash, password, salt string) bool {
+	expectedHash := hashPassword(password, salt)
+	return hash == expectedHash
 }
 
 func init() {
-	 // Connect to MongoDB
-	 clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:G30752G5JQc8tIa2yzi0UN4fV@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
-	 client, err := mongo.Connect(context.Background(), clientOptions)
-	 if err != nil {
-		 panic(err)
-	 }
- 
-	 
-	 // Ensure the connection is established
-	 err = client.Ping(context.Background(), nil)
-	 if err != nil {
-		 panic(err)
-	 }
- 
-	 // Get the key collection
-	 keyCollection := client.Database("filemanager").Collection("keys")
- 
+	// Connect to MongoDB
+	clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:G30752G5JQc8tIa2yzi0UN4fV@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
+	client, err := mongo.Connect(context.Background(), clientOptions)
+	if err != nil {
+		panic(err)
+	}
 
-	 // Initialize collections
+	// Ensure the connection is established
+	err = client.Ping(context.Background(), nil)
+	if err != nil {
+		panic(err)
+	}
+
+	// Get the key collection
+	keyCollection := client.Database("filemanager").Collection("keys")
+
+	// Initialize collections
 	userCollection = client.Database("filemanager").Collection("users")
 	fileCollection = client.Database("filemanager").Collection("files")
 
@@ -79,28 +100,27 @@ func init() {
 		}
 	}
 
+	// Retrieve the encryption key from MongoDB
+	var encryptionKey EncryptionKey
+	err = keyCollection.FindOne(context.Background(), bson.M{}).Decode(&encryptionKey)
+	if err == mongo.ErrNoDocuments {
+		// Generate a new key if none exists
+		if _, err := io.ReadFull(rand.Reader, secretKey[:]); err != nil {
+			panic(err)
+		}
 
-	 // Retrieve the encryption key from MongoDB
-	 var encryptionKey EncryptionKey
-	 err = keyCollection.FindOne(context.Background(), bson.M{}).Decode(&encryptionKey)
-	 if err == mongo.ErrNoDocuments {
-		 // Generate a new key if none exists
-		 if _, err := io.ReadFull(rand.Reader, secretKey[:]); err != nil {
-			 panic(err)
-		 }
- 
-		 // Store the new key in MongoDB
-		 _, err = keyCollection.InsertOne(context.Background(), EncryptionKey{Key: secretKey[:]})
-		 if err != nil {
-			 panic(err)
-		 }
-	 } else if err != nil {
-		 panic(err)
-	 } else {
-		 // Use the retrieved key
-		 copy(secretKey[:], encryptionKey.Key)
-	 }
-	 log.Println("Connected DB")
+		// Store the new key in MongoDB
+		_, err = keyCollection.InsertOne(context.Background(), EncryptionKey{Key: secretKey[:]})
+		if err != nil {
+			panic(err)
+		}
+	} else if err != nil {
+		panic(err)
+	} else {
+		// Use the retrieved key
+		copy(secretKey[:], encryptionKey.Key)
+	}
+	log.Println("Connected DB")
 }
 
 // func init() {
@@ -187,7 +207,6 @@ func main() {
 	// 	panic(err)
 	// }
 
-	
 	// Set up routes
 	http.HandleFunc("/", authMiddleware(homeHandler))
 	http.HandleFunc("/upload", authMiddleware(uploadHandler))
@@ -315,10 +334,16 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		// Find user in MongoDB
+		// Find the user in MongoDB
 		var user User
 		err := userCollection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
-		if err != nil || user.Password != password {
+		if err != nil {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		// Verify the password
+		if !verifyPassword(user.Password, password, user.Salt) {
 			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 			return
 		}
@@ -353,7 +378,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		// Check if user already exists
+		// Check if the user already exists
 		var user User
 		err := userCollection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
 		if err == nil {
@@ -361,9 +386,24 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Insert new user into MongoDB
+		// Generate a unique salt
+		salt, err := generateSalt()
+		if err != nil {
+			http.Error(w, "Unable to generate salt", http.StatusInternalServerError)
+			return
+		}
+
+		// Hash the password using Argon2
+		hashedPassword := hashPassword(password, salt)
+
+		// Save the user to MongoDB
 		userID := primitive.NewObjectID()
-		_, err = userCollection.InsertOne(context.Background(), User{ID: userID, Username: username, Password: password})
+		_, err = userCollection.InsertOne(context.Background(), User{
+			ID:       userID,
+			Username: username,
+			Password: hashedPassword,
+			Salt:     salt, // Store the salt
+		})
 		if err != nil {
 			http.Error(w, "Unable to register user", http.StatusInternalServerError)
 			return
@@ -565,11 +605,11 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Remove the file from the file system
 	// Generate the file path based on the user ID and file name
-    encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
-    if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
-        http.Error(w, "File not found", http.StatusNotFound)
-        return
-    }
+	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
+	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
 
 	err = os.Remove(encryptedFilePath)
 	if err != nil {
