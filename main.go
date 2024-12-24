@@ -80,10 +80,10 @@ func init() {
 	}
 
 	// Ensure the connection is established
-	err = client.Ping(context.Background(), nil)
-	if err != nil {
-		panic(err)
-	}
+	// err = client.Ping(context.Background(), nil)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	// Get the key collection
 	keyCollection := client.Database("filemanager").Collection("keys")
