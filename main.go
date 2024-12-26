@@ -17,6 +17,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/event"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/argon2"
@@ -77,6 +78,19 @@ func init() {
 
 	clientOptions := options.Client().ApplyURI(uri)
 
+	// Add a monitor for command events
+	clientOptions.SetMonitor(&event.CommandMonitor{
+		Started: func(ctx context.Context, evt *event.CommandStartedEvent) {
+			log.Printf("MongoDB Command Started: %s\n", evt.Command)
+		},
+		Succeeded: func(ctx context.Context, evt *event.CommandSucceededEvent) {
+			log.Printf("MongoDB Command Succeeded: %s\n", evt.CommandName)
+		},
+		Failed: func(ctx context.Context, evt *event.CommandFailedEvent) {
+			log.Printf("MongoDB Command Failed: %s\n", evt.CommandName)
+		},
+	})
+
 	// Optional: Configure TLS if needed
 	// tlsConfig := &tls.Config{InsecureSkipVerify: true} // Use with caution
 	// clientOptions.SetTLSConfig(tlsConfig)
@@ -86,11 +100,13 @@ func init() {
 		log.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
 
-	// Ensure the connection is established
-	// err = client.Ping(context.Background(), nil)
-	// if err != nil {
-	// 	panic(err)
-	// }
+	// Ping MongoDB
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = client.Ping(ctx, nil)
+	if err != nil {
+		log.Fatalf("MongoDB Ping Error: %v", err)
+	}
 
 	// Collections
 	keyCollection := client.Database("filemanager").Collection("keys")
