@@ -115,6 +115,7 @@ func init() {
 			panic(err)
 		}
 	} else if err != nil {
+		log.Println(err.Error())
 		panic(err)
 	} else {
 		// Use the retrieved key
