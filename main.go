@@ -10,6 +10,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -304,6 +306,16 @@ func decryptFile(inputFile, outputFile string) error {
 
 // Home Handler
 func homeHandler(w http.ResponseWriter, r *http.Request) {
+
+	target := "http://localhost:8080" // Backend server
+	proxyURL, _ := url.Parse(target)
+	proxy := httputil.NewSingleHostReverseProxy(proxyURL)
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		// Modify response headers if needed
+		resp.Header.Set("Content-Length", "100000000")
+		return nil
+	}
+
 	// Get the session cookie
 	cookie, err := r.Cookie("session")
 	if err != nil {
