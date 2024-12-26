@@ -37,7 +37,7 @@ type User struct {
 	ID       primitive.ObjectID `bson:"_id,omitempty"`
 	Username string             `bson:"username"`
 	Password string             `bson:"password"`
-	Salt     string             `bson:"salt"`  
+	Salt     string             `bson:"salt"`
 }
 
 type File struct {
@@ -73,10 +73,17 @@ func verifyPassword(hash, password, salt string) bool {
 
 func init() {
 	// Connect to MongoDB
-	clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:lQs8uz3A4WI4AtjL@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
+	uri := "mongodb+srv://filemanager:lQs8uz3A4WI4AtjL@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo&tls=true"
+
+	clientOptions := options.Client().ApplyURI(uri)
+
+	// Optional: Configure TLS if needed
+	// tlsConfig := &tls.Config{InsecureSkipVerify: true} // Use with caution
+	// clientOptions.SetTLSConfig(tlsConfig)
+
 	client, err := mongo.Connect(context.Background(), clientOptions)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
 
 	// Ensure the connection is established
@@ -85,10 +92,8 @@ func init() {
 	// 	panic(err)
 	// }
 
-	// Get the key collection
+	// Collections
 	keyCollection := client.Database("filemanager").Collection("keys")
-
-	// Initialize collections
 	userCollection = client.Database("filemanager").Collection("users")
 	fileCollection = client.Database("filemanager").Collection("files")
 
@@ -96,7 +101,7 @@ func init() {
 	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
 		err := os.Mkdir(uploadDir, 0755)
 		if err != nil {
-			panic(err)
+			log.Fatalf("Failed to create upload directory: %v", err)
 		}
 	}
 
@@ -106,17 +111,16 @@ func init() {
 	if err == mongo.ErrNoDocuments {
 		// Generate a new key if none exists
 		if _, err := io.ReadFull(rand.Reader, secretKey[:]); err != nil {
-			panic(err)
+			log.Fatalf("Failed to generate encryption key: %v", err)
 		}
 
 		// Store the new key in MongoDB
 		_, err = keyCollection.InsertOne(context.Background(), EncryptionKey{Key: secretKey[:]})
 		if err != nil {
-			panic(err)
+			log.Fatalf("Failed to store encryption key: %v", err)
 		}
 	} else if err != nil {
-		log.Println(err.Error())
-		panic(err)
+		log.Fatalf("Error retrieving encryption key: %v", err)
 	} else {
 		// Use the retrieved key
 		copy(secretKey[:], encryptionKey.Key)
@@ -719,4 +723,3 @@ func shareHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(fmt.Sprintf(`{"shareable_link": "%s"}`, shareableLink)))
 }
-
