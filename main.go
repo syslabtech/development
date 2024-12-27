@@ -84,17 +84,17 @@ func init() {
 	clientOptions := options.Client().ApplyURI(uri)
 
 	// Add a monitor for command events
-	clientOptions.SetMonitor(&event.CommandMonitor{
-		Started: func(ctx context.Context, evt *event.CommandStartedEvent) {
-			log.Printf("MongoDB Command Started: %s\n", evt.Command)
-		},
-		Succeeded: func(ctx context.Context, evt *event.CommandSucceededEvent) {
-			log.Printf("MongoDB Command Succeeded: %s\n", evt.CommandName)
-		},
-		Failed: func(ctx context.Context, evt *event.CommandFailedEvent) {
-			log.Printf("MongoDB Command Failed: %s\n", evt.CommandName)
-		},
-	})
+	// clientOptions.SetMonitor(&event.CommandMonitor{
+	// 	Started: func(ctx context.Context, evt *event.CommandStartedEvent) {
+	// 		log.Printf("MongoDB Command Started: %s\n", evt.Command)
+	// 	},
+	// 	Succeeded: func(ctx context.Context, evt *event.CommandSucceededEvent) {
+	// 		log.Printf("MongoDB Command Succeeded: %s\n", evt.CommandName)
+	// 	},
+	// 	Failed: func(ctx context.Context, evt *event.CommandFailedEvent) {
+	// 		log.Printf("MongoDB Command Failed: %s\n", evt.CommandName)
+	// 	},
+	// })
 
 	// Optional: Configure TLS if needed
 	// tlsConfig := &tls.Config{InsecureSkipVerify: true} // Use with caution
