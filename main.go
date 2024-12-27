@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,8 @@ var (
 	mutex          = &sync.Mutex{}
 	uploadDir      = "./uploads"
 	secretKey      [32]byte
+	// botToken       = "7407272507:" // Replace with your Telegram bot token
+	// channelID      = "-"                                 // Replace with your Telegram channel ID or username
 )
 
 type User struct {
@@ -503,6 +506,13 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Upload the file to Telegram
+	// err = uploadFileToTelegram(encryptedFilePath)
+	// if err != nil {
+	// 	http.Error(w, fmt.Sprintf("Failed to upload file to Telegram: %v", err), http.StatusInternalServerError)
+	// 	return
+	// }
+
 	// Remove the temporary file
 	os.Remove(tempFilePath)
 
@@ -565,6 +575,67 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, decryptedFilePath)
 
 }
+
+// func uploadFileToTelegram(filePath string) error {
+// 	// Open the file
+// 	file, err := os.Open(filePath)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to open file: %v", err)
+// 	}
+// 	defer file.Close()
+
+// 	// Get file info for the name
+// 	fileInfo, err := file.Stat()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to stat file: %v", err)
+// 	}
+
+// 	// Create a multipart form
+// 	body := &bytes.Buffer{}
+// 	writer := multipart.NewWriter(body)
+
+// 	// Add the file to the form
+// 	part, err := writer.CreateFormFile("document", fileInfo.Name())
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create form file: %v", err)
+// 	}
+// 	if _, err = io.Copy(part, file); err != nil {
+// 		return fmt.Errorf("failed to write file to form: %v", err)
+// 	}
+
+// 	// Add the channel ID to the form
+// 	if err = writer.WriteField("chat_id", channelID); err != nil {
+// 		return fmt.Errorf("failed to write chat_id: %v", err)
+// 	}
+
+// 	// Close the writer
+// 	if err = writer.Close(); err != nil {
+// 		return fmt.Errorf("failed to close writer: %v", err)
+// 	}
+
+// 	// Create and send the request
+// 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendDocument", botToken)
+// 	req, err := http.NewRequest("POST", url, body)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create request: %v", err)
+// 	}
+// 	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+// 	client := &http.Client{}
+// 	resp, err := client.Do(req)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to send request: %v", err)
+// 	}
+// 	defer resp.Body.Close()
+
+// 	// Check the response status
+// 	if resp.StatusCode != http.StatusOK {
+// 		return fmt.Errorf("unexpected response status: %v", resp.Status)
+// 	}
+
+// 	fmt.Println("File uploaded successfully!")
+// 	return nil
+// }
 
 // Delete Handler  Soft Delete
 // func deleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -666,55 +737,187 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Preview Handler
+// func previewHandler(w http.ResponseWriter, r *http.Request) {
+// 	// Get the session cookie
+// 	cookie, err := r.Cookie("session")
+// 	if err != nil {
+// 		log.Printf("Error retrieving session cookie: %v\n", err)
+// 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+// 		return
+// 	}
+
+// 	// Retrieve the user ID from the session
+// 	userIDHex, ok := sessionData[cookie.Value]
+// 	if !ok {
+// 		log.Printf("Invalid session ID: %v\n", cookie.Value)
+// 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+// 		return
+// 	}
+
+// 	userID, err := primitive.ObjectIDFromHex(userIDHex)
+// 	if err != nil {
+// 		log.Printf("Error decoding user ID: %v\n", err)
+// 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+// 		return
+// 	}
+
+// 	// Extract the file name from the URL path
+// 	fileName := filepath.Clean(filepath.Base(r.URL.Path))
+
+// 	// Check if the file belongs to the user in MongoDB
+// 	var file File
+// 	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
+// 	if err != nil {
+// 		log.Printf("Unauthorized access to file: %v\n", fileName)
+// 		http.Error(w, "Unauthorized to preview this file", http.StatusUnauthorized)
+// 		return
+// 	}
+
+// 	// Generate the file path based on the user ID and file name
+// 	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
+// 	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
+// 		log.Printf("File not found: %v\n", encryptedFilePath)
+// 		http.Error(w, "File not found", http.StatusNotFound)
+// 		return
+// 	}
+
+// 	// Decrypt the file into a temporary location
+// 	tempFile, err := os.CreateTemp("", fmt.Sprintf("%s_*_%s", userIDHex, fileName))
+// 	if err != nil {
+// 		log.Printf("Error creating temporary file: %v\n", err)
+// 		http.Error(w, "Unable to decrypt file", http.StatusInternalServerError)
+// 		return
+// 	}
+// 	defer os.Remove(tempFile.Name())
+
+// 	err = decryptFile(encryptedFilePath, tempFile.Name())
+// 	if err != nil {
+// 		log.Printf("Error decrypting file: %v\n", err)
+// 		http.Error(w, "Unable to decrypt file", http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	// Determine the content type from the file content
+// 	buffer := make([]byte, 512)
+// 	tempFile.Seek(0, 0)
+// 	tempFile.Read(buffer)
+// 	contentType := http.DetectContentType(buffer)
+// 	tempFile.Seek(0, 0)
+
+// 	// Restrict supported file types
+// 	if !strings.HasPrefix(contentType, "image/") && contentType != "application/pdf" {
+// 		log.Printf("Unsupported file type: %v\n", contentType)
+// 		http.Error(w, "Unsupported file type for preview", http.StatusUnsupportedMediaType)
+// 		return
+// 	}
+
+//		// Serve the decrypted file for preview
+//		w.Header().Set("Content-Type", contentType)
+//		http.ServeFile(w, r, tempFile.Name())
+//	}
 func previewHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the session cookie
 	cookie, err := r.Cookie("session")
 	if err != nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		logAndRedirect(w, r, "Error retrieving session cookie", "/login", http.StatusSeeOther)
 		return
 	}
 
 	// Retrieve the user ID from the session
-	userIDHex := sessionData[cookie.Value]
-	userID, err := primitive.ObjectIDFromHex(userIDHex)
-	if err != nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	userIDHex, ok := sessionData[cookie.Value]
+	if !ok {
+		logAndRedirect(w, r, "Invalid session ID", "/login", http.StatusSeeOther)
 		return
 	}
 
-	// Extract the file name from the URL path
-	fileName := filepath.Base(r.URL.Path)
+	userID, err := primitive.ObjectIDFromHex(userIDHex)
+	if err != nil {
+		logAndRedirect(w, r, "Error decoding user ID", "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Extract and sanitize the file name from the URL path
+	fileName := filepath.Clean(filepath.Base(r.URL.Path))
+	if fileName == "." || fileName == "/" {
+		logAndRespond(w, "Invalid file name", http.StatusBadRequest)
+		return
+	}
 
 	// Check if the file belongs to the user in MongoDB
 	var file File
 	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
 	if err != nil {
-		http.Error(w, "Unauthorized to preview this file", http.StatusUnauthorized)
+		logAndRespond(w, fmt.Sprintf("Unauthorized access to file: %v", fileName), http.StatusUnauthorized)
 		return
 	}
 
-	// Generate the file path based on the user ID and file name
+	// Locate the encrypted file
 	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
 	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
-		http.Error(w, "File not found", http.StatusNotFound)
+		logAndRespond(w, fmt.Sprintf("File not found: %v", encryptedFilePath), http.StatusNotFound)
 		return
 	}
 
-	// Decrypt the file
-	decryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
-	err = decryptFile(encryptedFilePath, decryptedFilePath)
+	// Decrypt the file into a temporary location
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("%s_*_%s", userIDHex, fileName))
 	if err != nil {
-		http.Error(w, "Unable to decrypt file", http.StatusInternalServerError)
+		logAndRespond(w, "Error creating temporary file", http.StatusInternalServerError)
 		return
 	}
-	defer os.Remove(decryptedFilePath)
+	defer os.Remove(tempFile.Name())
 
-	// Determine the content type
-	contentType := http.DetectContentType([]byte(fileName))
+	err = decryptFile(encryptedFilePath, tempFile.Name())
+	if err != nil {
+		logAndRespond(w, "Error decrypting file", http.StatusInternalServerError)
+		return
+	}
+
+	// Detect file type and validate it
+	buffer := make([]byte, 512)
+	tempFile.Seek(0, 0)
+	tempFile.Read(buffer)
+	contentType := http.DetectContentType(buffer)
+	tempFile.Seek(0, 0)
+
+	// Supported content types for preview
+	supportedTypes := map[string]bool{
+		"image/":           true,
+		"application/pdf":  true,
+		"text/plain":       true,
+		"application/json": true,
+		"video/":           true, // Video support
+	}
+
+	if !isSupportedContent(contentType, supportedTypes) {
+		logAndRespond(w, fmt.Sprintf("Unsupported file type: %v", contentType), http.StatusUnsupportedMediaType)
+		return
+	}
+
+	// Serve the file content for preview
 	w.Header().Set("Content-Type", contentType)
+	http.ServeFile(w, r, tempFile.Name())
+}
 
-	// Serve the decrypted file for preview
-	http.ServeFile(w, r, decryptedFilePath)
+// Helper to log an error and redirect
+func logAndRedirect(w http.ResponseWriter, r *http.Request, logMessage, redirectURL string, statusCode int) {
+	log.Printf("%s\n", logMessage)
+	http.Redirect(w, r, redirectURL, statusCode)
+}
+
+// Helper to log an error and respond with an HTTP status
+func logAndRespond(w http.ResponseWriter, logMessage string, statusCode int) {
+	log.Printf("%s\n", logMessage)
+	http.Error(w, logMessage, statusCode)
+}
+
+// Helper to check if the content type is supported
+func isSupportedContent(contentType string, supportedTypes map[string]bool) bool {
+	for prefix := range supportedTypes {
+		if strings.HasPrefix(contentType, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ...existing code...
