@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"filemanager/storage/doppler"
 	"fmt"
 	"html/template"
 	"io"
@@ -18,9 +19,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/event"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/argon2"
@@ -78,9 +79,13 @@ func verifyPassword(hash, password, salt string) bool {
 }
 
 func init() {
-	// Connect to MongoDB
-	uri := "mongodb+srv://filemanager:lQs8uz3A4WI4AtjL@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo&tls=true"
+	_ = godotenv.Load()
 
+	// Retrive critical information
+	doppler.FetchDopplerData()
+
+	// Connect to MongoDB
+	uri := os.Getenv("MONGODB_CONNECTION")
 	clientOptions := options.Client().ApplyURI(uri)
 
 	// Add a monitor for command events
