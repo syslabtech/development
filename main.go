@@ -105,10 +105,6 @@ func init() {
 	// Retrive critical information
 	doppler.FetchDopplerData()
 
-	// Connect to MongoDB
-	uri := os.Getenv("MONGODB_CONNECTION")
-	clientOptions := options.Client().ApplyURI(uri)
-
 	// Add a monitor for command events
 	// clientOptions.SetMonitor(&event.CommandMonitor{
 	// 	Started: func(ctx context.Context, evt *event.CommandStartedEvent) {
@@ -126,11 +122,6 @@ func init() {
 	// tlsConfig := &tls.Config{InsecureSkipVerify: true} // Use with caution
 	// clientOptions.SetTLSConfig(tlsConfig)
 
-	client, err := mongo.Connect(context.Background(), clientOptions)
-	if err != nil {
-		log.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-
 	// // Ping MongoDB
 	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	// defer cancel()
@@ -139,23 +130,6 @@ func init() {
 	// 	log.Fatalf("MongoDB Ping Error: %v", err)
 	// }
 
-	// Collections
-	keyCollection := client.Database("filemanager").Collection("keys")
-	userCollection = client.Database("filemanager").Collection("users")
-	fileCollection = client.Database("filemanager").Collection("files")
-
-	// Ensure the upload directory exists
-	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
-		err := os.Mkdir(uploadDir, 0755)
-		if err != nil {
-			log.Fatalf("Failed to create upload directory: %v", err)
-		}
-	}
-
-	// Initialize the encryption key
-	initEncryptionKey(keyCollection)
-
-	log.Println("Connected DB")
 }
 
 func initEncryptionKey(keyCollection *mongo.Collection) {
@@ -259,7 +233,34 @@ func initEncryptionKey(keyCollection *mongo.Collection) {
 // }
 
 func main() {
+
 	// Connect to MongoDB
+	uri := os.Getenv("MONGODB_CONNECTION")
+	clientOptions := options.Client().ApplyURI(uri)
+
+	client, err := mongo.Connect(context.Background(), clientOptions)
+	if err != nil {
+		log.Fatalf("Failed to connect to MongoDB: %v", err)
+	}
+
+	// Collections
+	keyCollection := client.Database("filemanager").Collection("keys")
+	userCollection = client.Database("filemanager").Collection("users")
+	fileCollection = client.Database("filemanager").Collection("files")
+
+	// Ensure the upload directory exists
+	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
+		err := os.Mkdir(uploadDir, 0755)
+		if err != nil {
+			log.Fatalf("Failed to create upload directory: %v", err)
+		}
+	}
+
+	// Initialize the encryption key
+	initEncryptionKey(keyCollection)
+
+	log.Println("Connected DB")
+
 	// var err error
 	// clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:G30752G5JQc8tIa2yzi0UN4fV@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
 	// client, err = mongo.Connect(context.Background(), clientOptions)
