@@ -79,6 +79,17 @@ func verifyPassword(hash, password, salt string) bool {
 }
 
 func init() {
+
+	// Get the current working directory
+	currentDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	// Print the current working directory
+	fmt.Println("Current Directory:", currentDir)
+	
 	_ = godotenv.Load()
 
 	// Retrive critical information
