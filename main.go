@@ -89,6 +89,17 @@ func init() {
 
 	// Print the current working directory
 	fmt.Println("Current Directory:", currentDir)
+
+
+	// Read the entire file content
+	content, err := ioutil.ReadFile("/workspace/.env")
+	if err != nil {
+		log.Fatalf("Error reading file: %v", err)
+	}
+
+	// Print the file content as a string
+	fmt.Println("File Content:")
+	fmt.Println(string(content))
 	
 	_ = godotenv.Load()
 
