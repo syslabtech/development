@@ -18,7 +18,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"io/ioutil"
 
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
@@ -91,17 +90,16 @@ func init() {
 	// Print the current working directory
 	fmt.Println("Current Directory:", currentDir)
 
-
 	// Read the entire file content
-	content, err := ioutil.ReadFile("/workspace/.env")
-	if err != nil {
-		log.Fatalf("Error reading file: %v", err)
-	}
+	// content, err := ioutil.ReadFile("/workspace/.env")
+	// if err != nil {
+	// 	log.Fatalf("Error reading file: %v", err)
+	// }
 
 	// Print the file content as a string
-	fmt.Println("File Content:")
-	fmt.Println(string(content))
-	
+	// fmt.Println("File Content:")
+	// fmt.Println(string(content))
+
 	_ = godotenv.Load()
 
 	// Retrive critical information
@@ -154,11 +152,23 @@ func init() {
 		}
 	}
 
-	// Retrieve the encryption key from MongoDB
+	// Initialize the encryption key
+	initEncryptionKey(keyCollection)
+
+	log.Println("Connected DB")
+}
+
+func initEncryptionKey(keyCollection *mongo.Collection) {
+	mutex.Lock() // Ensure only one instance can initialize the key at a time
+	defer mutex.Unlock()
+
+	// Attempt to retrieve the key
 	var encryptionKey EncryptionKey
-	err = keyCollection.FindOne(context.Background(), bson.M{}).Decode(&encryptionKey)
+	err := keyCollection.FindOne(context.Background(), bson.M{}).Decode(&encryptionKey)
 	if err == mongo.ErrNoDocuments {
-		// Generate a new key if none exists
+		fmt.Println("No encryption key found; generating a new key...")
+
+		// Generate a new key
 		if _, err := io.ReadFull(rand.Reader, secretKey[:]); err != nil {
 			log.Fatalf("Failed to generate encryption key: %v", err)
 		}
@@ -168,13 +178,15 @@ func init() {
 		if err != nil {
 			log.Fatalf("Failed to store encryption key: %v", err)
 		}
+
+		fmt.Println("New encryption key successfully generated and stored.")
 	} else if err != nil {
 		log.Fatalf("Error retrieving encryption key: %v", err)
 	} else {
 		// Use the retrieved key
 		copy(secretKey[:], encryptionKey.Key)
+		fmt.Println("Encryption key successfully retrieved.")
 	}
-	log.Println("Connected DB")
 }
 
 // func init() {
