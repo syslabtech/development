@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"filemanager/storage/doppler"
+	"filemanager/storage/telegram"
 	"fmt"
 	"html/template"
 	"io"
@@ -36,8 +37,7 @@ var (
 	mutex          = &sync.Mutex{}
 	uploadDir      = "./uploads"
 	secretKey      [32]byte
-	// botToken       = "7407272507:" // Replace with your Telegram bot token
-	// channelID      = "-"                                 // Replace with your Telegram channel ID or username
+	// Replace with your Telegram channel ID or username
 )
 
 type User struct {
@@ -47,10 +47,16 @@ type User struct {
 	Salt     string             `bson:"salt"`
 }
 
-type File struct {
-	UserID     primitive.ObjectID `bson:"user_id"`
-	Filename   string             `bson:"filename"`
-	UploadDate time.Time          `bson:"uploadDate"`
+type FileMetadata struct {
+	ID           primitive.ObjectID `bson:"_id"`            
+	MimeType     string             `bson:"mime_type"`      
+	UploadDate   time.Time          `bson:"upload_date"`    
+	UserID       primitive.ObjectID `bson:"user_id"`        
+	File         string             `bson:"file"`           
+	FileName     string             `bson:"file_name"`      
+	FileID       string             `bson:"file_id"`        
+	FileSize     int64              `bson:"file_size"`      
+	FileUniqueID string             `bson:"file_unique_id"` 
 }
 
 type EncryptionKey struct {
@@ -105,31 +111,6 @@ func init() {
 	// Retrive critical information
 	doppler.FetchDopplerData()
 
-	// Add a monitor for command events
-	// clientOptions.SetMonitor(&event.CommandMonitor{
-	// 	Started: func(ctx context.Context, evt *event.CommandStartedEvent) {
-	// 		log.Printf("MongoDB Command Started: %s\n", evt.Command)
-	// 	},
-	// 	Succeeded: func(ctx context.Context, evt *event.CommandSucceededEvent) {
-	// 		log.Printf("MongoDB Command Succeeded: %s\n", evt.CommandName)
-	// 	},
-	// 	Failed: func(ctx context.Context, evt *event.CommandFailedEvent) {
-	// 		log.Printf("MongoDB Command Failed: %s\n", evt.CommandName)
-	// 	},
-	// })
-
-	// Optional: Configure TLS if needed
-	// tlsConfig := &tls.Config{InsecureSkipVerify: true} // Use with caution
-	// clientOptions.SetTLSConfig(tlsConfig)
-
-	// // Ping MongoDB
-	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	// defer cancel()
-	// err = client.Ping(ctx, nil)
-	// if err != nil {
-	// 	log.Fatalf("MongoDB Ping Error: %v", err)
-	// }
-
 }
 
 func initEncryptionKey(keyCollection *mongo.Collection) {
@@ -163,75 +144,6 @@ func initEncryptionKey(keyCollection *mongo.Collection) {
 	}
 }
 
-// func init() {
-// 	// Load environment variables from the .env file
-// 	err := godotenv.Load()
-// 	if err != nil {
-// 		log.Fatalf("Error loading .env file: %v", err)
-// 	}
-
-// 	// Get the Vault address, HCP Client ID, and HCP Client Secret from environment variables
-// 	vaultAddr := os.Getenv("VAULT_ADDR")
-// 	hcpClientID := os.Getenv("HCP_CLIENT_ID")
-// 	hcpClientSecret := os.Getenv("HCP_CLIENT_SECRET")
-
-// 	// Initialize the Vault client
-// 	client, err := api.NewClient(&api.Config{
-// 		Address: vaultAddr, // Use the Vault address from environment variable
-// 	})
-// 	if err != nil {
-// 		log.Fatalf("Error creating Vault client: %v", err)
-// 	}
-
-// 	// Set up authentication data for HCP Vault
-// 	authData := map[string]interface{}{
-// 		"client_id":     hcpClientID,
-// 		"client_secret": hcpClientSecret,
-// 	}
-
-// 	// Authenticate with HCP Vault and retrieve a Vault token
-// 	// Making a direct API request for authentication
-// 	authResponse, err := client.Logical().Write("auth/hcp/login", authData)
-// 	if err != nil {
-// 		log.Fatalf("Error authenticating with HCP credentials: %v", err)
-// 	}
-
-// 	// Check if we received the client token from the authentication response
-// 	if authResponse == nil || authResponse.Auth == nil {
-// 		log.Fatalf("Authentication failed, no token returned")
-// 	}
-
-// 	// Set the Vault token for subsequent requests
-// 	client.SetToken(authResponse.Auth.ClientToken)
-
-// 	// Specify the path to the secret (for example, "secret/data/my-secret")
-// 	secretPath := "secret/data/my-secret" // Adjust the path to your secret
-
-// 	// Retrieve the secret from Vault
-// 	secret, err := client.Logical().Read(secretPath)
-// 	if err != nil {
-// 		log.Fatalf("Error reading secret from Vault: %v", err)
-// 	}
-
-// 	// Check if the secret was found
-// 	if secret == nil {
-// 		log.Fatalf("Secret not found at path %s", secretPath)
-// 	}
-
-// 	// Extract the value from the secret
-// 	// Assuming the secret is stored as a key-value pair, e.g., {"data": {"my-key": "my-value"}}
-// 	if data, ok := secret.Data["data"].(map[string]interface{}); ok {
-// 		if myValue, ok := data["my-key"].(string); ok {
-// 			fmt.Printf("Retrieved secret value: %s\n", myValue)
-// 		} else {
-// 			log.Fatalf("Key 'my-key' not found in the secret data")
-// 		}
-// 	} else {
-// 		log.Fatalf("Invalid secret structure")
-// 	}
-
-// }
-
 func main() {
 
 	// Connect to MongoDB
@@ -260,19 +172,6 @@ func main() {
 	initEncryptionKey(keyCollection)
 
 	log.Println("Connected DB")
-
-	// var err error
-	// clientOptions := options.Client().ApplyURI("mongodb+srv://filemanager:G30752G5JQc8tIa2yzi0UN4fV@choreo.06gdy.mongodb.net/?retryWrites=true&w=majority&appName=choreo")
-	// client, err = mongo.Connect(context.Background(), clientOptions)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// Ensure MongoDB client is connected
-	// err = client.Ping(context.Background(), nil)
-	// if err != nil {
-	// 	panic(err)
-	// }
 
 	// Set up routes
 	http.HandleFunc("/", authMiddleware(homeHandler))
@@ -376,7 +275,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve the user's files from MongoDB
-	var files []File
+	var files []FileMetadata
 	cursor, err := fileCollection.Find(context.Background(), bson.M{"user_id": userID, "deleted": bson.M{"$ne": true}})
 	if err != nil {
 		http.Error(w, "Unable to retrieve files", http.StatusInternalServerError)
@@ -385,7 +284,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	defer cursor.Close(context.Background())
 
 	for cursor.Next(context.Background()) {
-		var file File
+		var file FileMetadata
 		err := cursor.Decode(&file)
 		if err != nil {
 			http.Error(w, "Unable to decode file", http.StatusInternalServerError)
@@ -402,6 +301,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	err = tmpl.Execute(w, files)
 	if err != nil {
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)
+		log.Fatalf("Error parsing template: %v", err)
+
 	}
 }
 
@@ -516,6 +417,13 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Example: Validate file size
+	fileSize := r.ContentLength
+	if err := validateFileSize(fileSize); err != nil {
+		logAndRespond(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Retrieve the uploaded file
 	file, handler, err := r.FormFile("file")
 	if err != nil {
@@ -524,9 +432,14 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Save the file with a unique name for the user
-	tempFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.tmp", userIDHex, handler.Filename))
-	dst, err := os.Create(tempFilePath)
+	// Generate the file names (without directory)
+	baseFileName := fmt.Sprintf("%s_%s", userIDHex, handler.Filename)
+	originalFilePath := filepath.Join(uploadDir, baseFileName)
+	// encryptedFileName := fmt.Sprintf("%s.enc", baseFileName)
+	// encryptedFilePath := filepath.Join(uploadDir, encryptedFileName)
+
+	// Save the original file
+	dst, err := os.Create(originalFilePath)
 	if err != nil {
 		http.Error(w, "Unable to save file", http.StatusInternalServerError)
 		return
@@ -540,29 +453,55 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Encrypt the file
-	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, handler.Filename))
-	err = encryptFile(tempFilePath, encryptedFilePath)
-	if err != nil {
-		http.Error(w, "Unable to encrypt file", http.StatusInternalServerError)
-		return
-	}
-
-	// Upload the file to Telegram
-	// err = uploadFileToTelegram(encryptedFilePath)
+	// err = encryptFile(originalFilePath, encryptedFilePath)
 	// if err != nil {
-	// 	http.Error(w, fmt.Sprintf("Failed to upload file to Telegram: %v", err), http.StatusInternalServerError)
+	// 	http.Error(w, "Unable to encrypt file", http.StatusInternalServerError)
 	// 	return
 	// }
 
-	// Remove the temporary file
-	os.Remove(tempFilePath)
+	// Upload the original file to Telegram
+	telegramMetadata, err := telegram.UploadFileToTelegram(originalFilePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to upload normal file to Telegram: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-	// Add file metadata to MongoDB
-	_, err = fileCollection.InsertOne(context.Background(), File{UserID: userID, Filename: handler.Filename, UploadDate: time.Now()})
+	// // Upload the encrypted file to Telegram
+	// err = uploadFileToTelegram(encryptedFilePath)
+	// if err != nil {
+	// 	http.Error(w, fmt.Sprintf("Failed to upload encrypted file to Telegram: %v", err), http.StatusInternalServerError)
+	// 	return
+	// }
+
+	// Add file metadata with sanitized paths to MongoDB
+	// _, err = fileCollection.InsertOne(context.Background(), bson.M{
+	// 	"user_id":             userID,
+	// 	"filename":            handler.Filename,
+	// 	"original_file_path":  baseFileName,      // Only filename
+	// 	"encrypted_file_path": encryptedFileName, // Only filename
+	// 	"upload_date":         time.Now(),
+	// })
+
+	// Add file metadata with Telegram details to MongoDB
+	_, err = fileCollection.InsertOne(context.Background(), bson.M{
+		"user_id":        userID,
+		"file":           handler.Filename,
+		"file_name":      telegramMetadata["file_name"],
+		"file_id":        telegramMetadata["file_id"],
+		"file_size":      telegramMetadata["file_size"],
+		"file_unique_id": telegramMetadata["file_unique_id"],
+		"mime_type":      telegramMetadata["mime_type"],
+		"upload_date":    time.Now(),
+	})
+
 	if err != nil {
 		http.Error(w, "Unable to save file metadata", http.StatusInternalServerError)
 		return
 	}
+
+	// Remove the temporary files
+	os.Remove(originalFilePath)
+	// os.Remove(encryptedFilePath)
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -584,143 +523,42 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract the file name from the URL path
-	fileName := filepath.Base(r.URL.Path)
+	// Extract the file ID from the URL query parameter
+	fileID := r.URL.Query().Get("id")
+	if fileID == "" {
+		http.Error(w, "Invalid file ID", http.StatusBadRequest)
+		return
+	}
+
+	fileObjID, err := primitive.ObjectIDFromHex(fileID)
+	if err != nil {
+		http.Error(w, "Invalid file ID", http.StatusBadRequest)
+		return
+	}
 
 	// Check if the file belongs to the user in MongoDB
-	var file File
-	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
+	var file FileMetadata
+	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "_id": fileObjID}).Decode(&file)
 	if err != nil {
+		log.Printf("MongoDB query error: %v", err)
 		http.Error(w, "Unauthorized to access this file", http.StatusUnauthorized)
 		return
 	}
 
-	// Generate the file path based on the user ID and file name
-	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
-	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-
-	// Decrypt the file
-	decryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s", userIDHex, fileName))
-	err = decryptFile(encryptedFilePath, decryptedFilePath)
+	// Retrieve the file from Telegram API
+	filePath, err := telegram.RetrieveFileFromTelegram(file.FileID)
 	if err != nil {
-		http.Error(w, "Unable to decrypt file", http.StatusInternalServerError)
+		http.Error(w, "Unable to retrieve file from Telegram: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer os.Remove(decryptedFilePath)
+	defer os.Remove(filePath) // Clean up temporary file after serving
 
 	// Set the headers for file download
-	w.Header().Set("Content-Disposition", "attachment; filename="+fileName)
-	http.ServeFile(w, r, decryptedFilePath)
-
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", file.File))
+	http.ServeFile(w, r, filePath)
 }
 
-// func uploadFileToTelegram(filePath string) error {
-// 	// Open the file
-// 	file, err := os.Open(filePath)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to open file: %v", err)
-// 	}
-// 	defer file.Close()
-
-// 	// Get file info for the name
-// 	fileInfo, err := file.Stat()
-// 	if err != nil {
-// 		return fmt.Errorf("failed to stat file: %v", err)
-// 	}
-
-// 	// Create a multipart form
-// 	body := &bytes.Buffer{}
-// 	writer := multipart.NewWriter(body)
-
-// 	// Add the file to the form
-// 	part, err := writer.CreateFormFile("document", fileInfo.Name())
-// 	if err != nil {
-// 		return fmt.Errorf("failed to create form file: %v", err)
-// 	}
-// 	if _, err = io.Copy(part, file); err != nil {
-// 		return fmt.Errorf("failed to write file to form: %v", err)
-// 	}
-
-// 	// Add the channel ID to the form
-// 	if err = writer.WriteField("chat_id", channelID); err != nil {
-// 		return fmt.Errorf("failed to write chat_id: %v", err)
-// 	}
-
-// 	// Close the writer
-// 	if err = writer.Close(); err != nil {
-// 		return fmt.Errorf("failed to close writer: %v", err)
-// 	}
-
-// 	// Create and send the request
-// 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendDocument", botToken)
-// 	req, err := http.NewRequest("POST", url, body)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to create request: %v", err)
-// 	}
-// 	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-// 	client := &http.Client{}
-// 	resp, err := client.Do(req)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to send request: %v", err)
-// 	}
-// 	defer resp.Body.Close()
-
-// 	// Check the response status
-// 	if resp.StatusCode != http.StatusOK {
-// 		return fmt.Errorf("unexpected response status: %v", resp.Status)
-// 	}
-
-// 	fmt.Println("File uploaded successfully!")
-// 	return nil
-// }
-
 // Delete Handler  Soft Delete
-// func deleteHandler(w http.ResponseWriter, r *http.Request) {
-//     // Get the session cookie
-//     cookie, err := r.Cookie("session")
-//     if err != nil {
-//         http.Redirect(w, r, "/login", http.StatusSeeOther)
-//         return
-//     }
-
-//     // Retrieve the user ID from the session
-//     userIDHex := sessionData[cookie.Value]
-//     userID, err := primitive.ObjectIDFromHex(userIDHex)
-//     if err != nil {
-//         http.Redirect(w, r, "/login", http.StatusSeeOther)
-//         return
-//     }
-
-//     // Extract the file name from the URL path
-//     fileName := filepath.Base(r.URL.Path)
-
-//     // Check if the file belongs to the user in MongoDB
-//     var file File
-//     err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName, "deleted": bson.M{"$ne": true}}).Decode(&file)
-//     if err != nil {
-//         http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
-//         return
-//     }
-
-//     // Flag the file as deleted in MongoDB
-//     update := bson.M{"$set": bson.M{"deleted": true}}
-//     _, err = fileCollection.UpdateOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}, update)
-//     if err != nil {
-//         http.Error(w, "Unable to update file metadata", http.StatusInternalServerError)
-//         return
-//     }
-
-//     // Optional: Log or perform other operations (e.g., send a notification, etc.)
-
-//     // Redirect back to the home page (or wherever you want)
-//     http.Redirect(w, r, "/", http.StatusSeeOther)
-// }
-
-// Soft Delete
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	// Get the session cookie
 	cookie, err := r.Cookie("session")
@@ -737,45 +575,100 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract the file name from the URL path
-	fileName := filepath.Base(r.URL.Path)
+	// Extract the file ID (ObjectID) from the URL path
+	fileIDHex := filepath.Base(r.URL.Path)
+	fileID, err := primitive.ObjectIDFromHex(fileIDHex)
+	if err != nil {
+		http.Error(w, "Invalid file ID", http.StatusBadRequest)
+		return
+	}
 
 	// Check if the file belongs to the user in MongoDB
-	var file File
-	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
+	var file FileMetadata
+	err = fileCollection.FindOne(context.Background(), bson.M{
+		"_id":     fileID,
+		"user_id": userID,
+		"deleted": bson.M{"$ne": true},
+	}).Decode(&file)
 	if err != nil {
 		http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
 		return
 	}
 
-	// Remove the file from the file system
-	// Generate the file path based on the user ID and file name
-	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
-	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-
-	err = os.Remove(encryptedFilePath)
-	if err != nil {
-		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
-		return
-	}
-
-	// Update file metadata to mark it as deleted in MongoDB
-	_, err = fileCollection.UpdateOne(
-		context.Background(),
-		bson.M{"user_id": userID, "filename": fileName},
-		bson.M{"$set": bson.M{"deleted": true}},
-	)
+	// Flag the file as deleted in MongoDB
+	update := bson.M{"$set": bson.M{"deleted": true}}
+	_, err = fileCollection.UpdateOne(context.Background(), bson.M{"_id": fileID, "user_id": userID}, update)
 	if err != nil {
 		http.Error(w, "Unable to update file metadata", http.StatusInternalServerError)
 		return
 	}
 
-	// Redirect back to the home page
+	// Optional: Additional cleanup, logging, or notification logic
+
+	// Redirect back to the home page (or wherever you want)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
+
+// Hard Delete
+// func deleteHandler(w http.ResponseWriter, r *http.Request) {
+// 	// Get the session cookie
+// 	cookie, err := r.Cookie("session")
+// 	if err != nil {
+// 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+// 		return
+// 	}
+
+// 	// Retrieve the user ID from the session
+// 	userIDHex := sessionData[cookie.Value]
+// 	userID, err := primitive.ObjectIDFromHex(userIDHex)
+// 	if err != nil {
+// 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+// 		return
+// 	}
+
+// 	// Extract the file ID from the URL path
+// 	fileIDHex := filepath.Base(r.URL.Path)
+// 	fileID, err := primitive.ObjectIDFromHex(fileIDHex)
+// 	if err != nil {
+// 		http.Error(w, "Invalid file ID", http.StatusBadRequest)
+// 		return
+// 	}
+
+// 	// Check if the file belongs to the user in MongoDB
+// 	var file FileMetadata
+// 	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "_id": fileID}).Decode(&file)
+// 	if err != nil {
+// 		http.Error(w, "Unauthorized to delete this file", http.StatusUnauthorized)
+// 		return
+// 	}
+
+// 	// Remove the file from the file system
+// 	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userID.Hex(), file.File))
+// 	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
+// 		http.Error(w, "File not found", http.StatusNotFound)
+// 		return
+// 	}
+
+// 	err = os.Remove(encryptedFilePath)
+// 	if err != nil {
+// 		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	// Mark the file as deleted in MongoDB
+// 	_, err = fileCollection.UpdateOne(
+// 		context.Background(),
+// 		bson.M{"_id": fileID, "user_id": userID},
+// 		bson.M{"$set": bson.M{"deleted": true}},
+// 	)
+// 	if err != nil {
+// 		http.Error(w, "Unable to update file metadata", http.StatusInternalServerError)
+// 		return
+// 	}
+
+// 	// Redirect back to the home page
+// 	http.Redirect(w, r, "/", http.StatusSeeOther)
+// }
 
 // Preview Handler
 // func previewHandler(w http.ResponseWriter, r *http.Request) {
@@ -877,48 +770,47 @@ func previewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract and sanitize the file name from the URL path
-	fileName := filepath.Clean(filepath.Base(r.URL.Path))
-	if fileName == "." || fileName == "/" {
-		logAndRespond(w, "Invalid file name", http.StatusBadRequest)
+	// Extract and sanitize the ObjectID from the URL query parameters
+	objectIDHex := r.URL.Query().Get("id") // Use the `id` from the URL query parameters
+	fmt.Println("objectIDHex: ", objectIDHex)
+	if objectIDHex == "" {
+		logAndRespond(w, "Invalid ObjectID", http.StatusBadRequest)
+		return
+	}
+
+	// Convert the ObjectIDHex (string) to a primitive.ObjectID
+	objectID, err := primitive.ObjectIDFromHex(objectIDHex)
+	if err != nil {
+		logAndRespond(w, "Invalid ObjectID format", http.StatusBadRequest)
 		return
 	}
 
 	// Check if the file belongs to the user in MongoDB
-	var file File
-	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
+	var file FileMetadata
+	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "_id": objectID}).Decode(&file)
 	if err != nil {
-		logAndRespond(w, fmt.Sprintf("Unauthorized access to file: %v", fileName), http.StatusUnauthorized)
+		logAndRespond(w, fmt.Sprintf("Unauthorized access to file: %v", objectIDHex), http.StatusUnauthorized)
 		return
 	}
 
-	// Locate the encrypted file
-	encryptedFilePath := filepath.Join(uploadDir, fmt.Sprintf("%s_%s.enc", userIDHex, fileName))
-	if _, err := os.Stat(encryptedFilePath); os.IsNotExist(err) {
-		logAndRespond(w, fmt.Sprintf("File not found: %v", encryptedFilePath), http.StatusNotFound)
-		return
-	}
-
-	// Decrypt the file into a temporary location
-	tempFile, err := os.CreateTemp("", fmt.Sprintf("%s_*_%s", userIDHex, fileName))
+	filePath, err := telegram.RetrieveFileFromTelegram(file.FileID) // Use file_id from Telegram metadata
 	if err != nil {
-		logAndRespond(w, "Error creating temporary file", http.StatusInternalServerError)
-		return
-	}
-	defer os.Remove(tempFile.Name())
-
-	err = decryptFile(encryptedFilePath, tempFile.Name())
-	if err != nil {
-		logAndRespond(w, "Error decrypting file", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve file from Telegram: %v", err)
+		logAndRespond(w, "Error retrieving file from Telegram", http.StatusInternalServerError)
 		return
 	}
 
 	// Detect file type and validate it
+	tempFile, err := os.Open(filePath)
+	if err != nil {
+		logAndRespond(w, "Error opening file for preview", http.StatusInternalServerError)
+		return
+	}
+	defer tempFile.Close()
+
 	buffer := make([]byte, 512)
-	tempFile.Seek(0, 0)
 	tempFile.Read(buffer)
 	contentType := http.DetectContentType(buffer)
-	tempFile.Seek(0, 0)
 
 	// Supported content types for preview
 	supportedTypes := map[string]bool{
@@ -936,7 +828,16 @@ func previewHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Serve the file content for preview
 	w.Header().Set("Content-Type", contentType)
-	http.ServeFile(w, r, tempFile.Name())
+	http.ServeFile(w, r, filePath)
+}
+
+// retrieveFileFromTelegram fetches a file from Telegram using its file ID.
+
+func validateFileSize(fileSize int64) error {
+	if fileSize > 20*1024*1024 { // 20MB limit
+		return fmt.Errorf("file size exceeds Telegram API limit of 20MB")
+	}
+	return nil
 }
 
 // Helper to log an error and redirect
@@ -959,39 +860,4 @@ func isSupportedContent(contentType string, supportedTypes map[string]bool) bool
 		}
 	}
 	return false
-}
-
-// ...existing code...
-
-func shareHandler(w http.ResponseWriter, r *http.Request) {
-	// Get the session cookie
-	cookie, err := r.Cookie("session")
-	if err != nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-
-	// Retrieve the user ID from the session
-	userIDHex := sessionData[cookie.Value]
-	userID, err := primitive.ObjectIDFromHex(userIDHex)
-	if err != nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-
-	// Extract the file name from the URL path
-	fileName := filepath.Base(r.URL.Path)
-
-	// Check if the file belongs to the user in MongoDB
-	var file File
-	err = fileCollection.FindOne(context.Background(), bson.M{"user_id": userID, "filename": fileName}).Decode(&file)
-	if err != nil {
-		http.Error(w, "Unauthorized to access this file", http.StatusUnauthorized)
-		return
-	}
-
-	// Generate the shareable link
-	shareableLink := fmt.Sprintf("%s/download/%s", r.Host, fileName)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(fmt.Sprintf(`{"shareable_link": "%s"}`, shareableLink)))
 }
