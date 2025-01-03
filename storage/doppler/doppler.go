@@ -12,7 +12,6 @@ import (
 var (
 	projectName   = "filemanager"
 	projectConfig = "stg"
-	
 )
 
 func FetchDopplerData() {
@@ -52,5 +51,7 @@ func FetchDopplerData() {
 	}
 
 	_ = os.Setenv("MONGODB_CONNECTION", data.MONGODB)
+	_ = os.Setenv("TELEGRAM_BOT_TOKEN", data.TELEGRAM_BOT_TOKEN)
+	_ = os.Setenv("TELEGRAM_CHANNEL_ID", data.TELEGRAM_CHANNEL_ID)
 
 }

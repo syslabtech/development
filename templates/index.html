@@ -21,7 +21,8 @@
             padding: 30px;
         }
 
-        h1, h2 {
+        h1,
+        h2 {
             color: #343a40;
         }
 
@@ -92,14 +93,19 @@
                 {{range .}} <!-- Iterate over files -->
                 <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center">
                     <!-- Display Filename -->
-                    <span class="text-truncate" style="max-width: 60%;">{{.Filename}}</span>
+                    <span class="text-truncate" style="max-width: 60%;">{{.File}}</span>
+
                     <div class="mt-2 mt-md-0">
                         <!-- Preview Button -->
-                        <button class="btn btn-sm btn-info preview-btn" data-filename="{{.Filename}}" data-bs-toggle="modal" data-bs-target="#previewModal">Preview</button>
+                        <button class="btn btn-sm btn-info preview-btn" data-id="{{.ID.Hex}}" data-bs-toggle="modal"
+                            data-bs-target="#previewModal">Preview</button>
+
                         <!-- Download Button -->
-                        <a href="/download/{{.Filename}}" class="btn btn-sm btn-success">Download</a>
+                        <a href="/download?id={{.ID.Hex}}" class="btn btn-sm btn-success">Download</a>
+
                         <!-- Delete Button -->
-                        <button class="btn btn-sm btn-danger delete-btn" data-filename="{{.Filename}}">Delete</button>
+                        <button class="btn btn-sm btn-danger delete-btn" data-id="{{.ID.Hex}}">Delete</button>
+
                     </div>
                 </li>
                 {{end}}
@@ -136,19 +142,20 @@
         $(document).ready(function () {
             // Attach click event to preview buttons
             $(".preview-btn").on("click", function () {
-                var fileName = $(this).data("filename");
-                // Set iframe src for preview
-                $("#previewIframe").attr("src", "/preview/" + fileName);
+                var objectID = $(this).data("id"); // Get the ObjectID (as string)
+                // Set iframe src for preview with objectID as query parameter
+                $("#previewIframe").attr("src", "/preview?id=" + encodeURIComponent(objectID));
             });
 
             // Attach click event to delete buttons
             $(".delete-btn").on("click", function () {
-                var fileName = $(this).data("filename");
+                var fileID = $(this).data("id");
                 if (confirm("Are you sure you want to delete this file?")) {
                     // Redirect to delete URL
-                    window.location.href = "/delete/" + fileName;
+                    window.location.href = "/delete/" + fileID;
                 }
             });
+
         });
     </script>
 </body>
