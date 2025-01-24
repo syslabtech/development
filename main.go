@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/newrelic/go-agent/v3/newrelic"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -48,15 +49,15 @@ type User struct {
 }
 
 type FileMetadata struct {
-	ID           primitive.ObjectID `bson:"_id"`            
-	MimeType     string             `bson:"mime_type"`      
-	UploadDate   time.Time          `bson:"upload_date"`    
-	UserID       primitive.ObjectID `bson:"user_id"`        
-	File         string             `bson:"file"`           
-	FileName     string             `bson:"file_name"`      
-	FileID       string             `bson:"file_id"`        
-	FileSize     int64              `bson:"file_size"`      
-	FileUniqueID string             `bson:"file_unique_id"` 
+	ID           primitive.ObjectID `bson:"_id"`
+	MimeType     string             `bson:"mime_type"`
+	UploadDate   time.Time          `bson:"upload_date"`
+	UserID       primitive.ObjectID `bson:"user_id"`
+	File         string             `bson:"file"`
+	FileName     string             `bson:"file_name"`
+	FileID       string             `bson:"file_id"`
+	FileSize     int64              `bson:"file_size"`
+	FileUniqueID string             `bson:"file_unique_id"`
 }
 
 type EncryptionKey struct {
@@ -182,12 +183,24 @@ func main() {
 	http.HandleFunc("/login", loginHandler)
 	http.HandleFunc("/logout", logoutHandler)
 	http.HandleFunc("/register", registerHandler)
+	http.HandleFunc(newrelic.WrapHandleFunc(newrelicApp(), "/home", homeHandler))
 
 	fmt.Println("Server started at http://localhost:8080")
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		panic(err)
 	}
+}
+
+func newrelicApp() (app *newrelic.Application) {
+	app, _ = newrelic.NewApplication(
+		newrelic.ConfigAppName("File Manager"),
+		newrelic.ConfigLicense("511c42284fa5dec03f4c6393957e84c7FFFFNRAL"),
+		newrelic.ConfigAppLogForwardingEnabled(true),
+	)
+	txn := app.StartTransaction("transaction_name")
+	defer txn.End()
+	return
 }
 
 // Middleware to check authentication
